@@ -1,0 +1,22 @@
+/* STREAMING_CHUNK: Setting up Tailwind styles... */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+body {
+margin: 0;
+font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
+'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
+sans-serif;
+-webkit-font-smoothing: antialiased;
+-moz-osx-font-smoothing: grayscale;
+}
+
+/* Custom Scrollbar configuration for interactive elements /
+.scrollbar-hide::-webkit-scrollbar {
+display: none;
+}
+.scrollbar-hide {
+-ms-overflow-style: none;  / IE and Edge /
+scrollbar-width: none;  / Firefox */
+}
