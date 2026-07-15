@@ -1,4 +1,355 @@
-import React, { useState, useEffect } from 'react';
+const fs = require('fs');
+const path = require('path');
+
+console.log("========================================================================");
+console.log("🌱 ระบบสร้างและจัดเรียงไฟล์ติดตั้ง Smart Hydroponics Tracker (ฉบับอัปเดตล่าสุด) 🌱");
+console.log("========================================================================");
+
+// สร้างรายชื่อโฟลเดอร์ที่จำเป็น
+const directories = ['src'];
+
+directories.forEach(dir => {
+  if (!fs.existsSync(dir)) {
+    fs.mkdirSync(dir);
+    console.log(`📁 สร้างโฟลเดอร์: ${dir}/ สำเร็จ`);
+  }
+});
+
+// พจนานุกรมไฟล์และคอนเทนต์เบื้องต้น
+const files = {
+  // 1. package.json สำหรับ npm dependencies
+  'package.json': `{
+  "name": "smart-hydroponics-tracker",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "lint": "eslint . --ext js,jsx --report-unused-disable-directives --max-warnings 0",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@types/react": "^18.3.3",
+    "@types/react-dom": "^18.3.0",
+    "@vitejs/plugin-react": "^4.3.1",
+    "autoprefixer": "^10.4.19",
+    "postcss": "^8.4.38",
+    "tailwindcss": "^3.4.4",
+    "vite": "^5.3.1"
+  }
+}`,
+
+  // 2. คอนฟิกการทำงานระบบ Vite
+  'vite.config.js': `import { defineConfig } from 'vite';
+import react from '@vitejs/plugin-react';
+
+export default defineConfig({
+  plugins: [react()],
+  server: {
+    port: 3000,
+    open: true
+  }
+});`,
+
+  // 3. คอนฟิก Tailwind CSS
+  'tailwind.config.js': `/** @type {import('tailwindcss').Config} */
+export default {
+  content: [
+    "./index.html",
+    "./src/**/*.{js,ts,jsx,tsx}",
+  ],
+  theme: {
+    extend: {},
+  },
+  plugins: [],
+}`,
+
+  // 4. คอนฟิก PostCSS
+  'postcss.config.js': `export default {
+  plugins: {
+    tailwindcss: {},
+    autoprefixer: {},
+  },
+}`,
+
+  // 5. โครงสร้าง index.html สำหรับเป็นหน้าแรกของแอปพลิเคชัน
+  'index.html': `<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="UTF-8" />
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🌱</text></svg>" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Smart Hydroponics Tracker</title>
+</head>
+<body class="bg-slate-100">
+  <div id="root"></div>
+  <script type="module" src="/src/main.jsx"></script>
+</body>
+</html>`,
+
+  // 6. การละเว้นโฟลเดอร์ที่ไม่จำเป็นใน Git
+  '.gitignore': `node_modules/
+dist/
+dist-ssr/
+*.local
+.env
+.env.*.local
+*.log
+.DS_Store`,
+
+  // 7. ตัวอย่างตัวแปรสภาพแวดล้อม
+  '.env.example': `VITE_APPS_SCRIPT_URL=https://script.google.com/macros/s/YOUR_APPS_SCRIPT_DEPLOY_ID/exec`,
+
+  // 8. การเปลี่ยนเส้นทางของ Vercel Routing
+  'vercel.json': `{
+  "rewrites": [
+    {
+      "source": "/(.*)",
+      "destination": "/index.html"
+    }
+  ]
+}`,
+
+  // 9. สไตล์ CSS พื้นฐานของ Tailwind
+  'src/index.css': `@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+body {
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
+    'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
+    sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
+}
+.scrollbar-hide {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}`,
+
+  // 10. ไฟล์เริ่มต้นการทำงานของแอปพลิเคชันฝั่ง React
+  'src/main.jsx': `import React from 'react'
+import ReactDOM from 'react-dom/client'
+import App from './App.jsx'
+import './index.css'
+
+ReactDOM.createRoot(document.getElementById('root')).render(
+  <React.StrictMode>
+    <App />
+  </React.StrictMode>,
+)`,
+
+  // 11. ฟังก์ชันจัดเรียง API เชื่อมต่อไปยัง Google Sheet
+  'src/api.js': `const APPS_SCRIPT_URL = import.meta.env.VITE_APPS_SCRIPT_URL;
+
+const verifyConfiguration = () => {
+  if (!APPS_SCRIPT_URL) {
+    throw new Error(
+      "ไม่พบคอนฟิก VITE_APPS_SCRIPT_URL กรุณาตรวจสอบว่าได้ตั้งค่าตัวแปรในระบบหรือไฟล์ .env แล้ว"
+    );
+  }
+};
+
+export async function getData() {
+  try {
+    verifyConfiguration();
+    const response = await fetch(APPS_SCRIPT_URL, {
+      method: "GET",
+      headers: {
+        "Accept": "application/json",
+      },
+    });
+
+    if (!response.ok) {
+      throw new Error(\`เกิดข้อผิดพลาดจากเซิร์ฟเวอร์หลัก (รหัสสถานะ: \${response.status})\`);
+    }
+
+    const result = await response.json();
+    return result;
+  } catch (error) {
+    console.error("API GET Error:", error);
+    throw new Error(\`ไม่สามารถดึงข้อมูลจาก Google Sheets ได้: \${error.message}\`);
+  }
+}
+
+export async function postData(payload) {
+  try {
+    verifyConfiguration();
+    const response = await fetch(APPS_SCRIPT_URL, {
+      method: "POST",
+      headers: {
+        "Content-Type": "text/plain;charset=utf-8",
+      },
+      body: JSON.stringify(payload),
+    });
+
+    if (!response.ok) {
+      throw new Error(\`ส่งข้อมูลไม่สำเร็จ (รหัสสถานะ: \${response.status})\`);
+    }
+
+    const result = await response.json();
+    if (result.status === "error") {
+      throw new Error(result.message || "เซิร์ฟเวอร์ปฏิเสธการบันทึกข้อมูล");
+    }
+
+    return result;
+  } catch (error) {
+    console.error("API POST Error:", error);
+    throw new Error(\`ไม่สามารถส่งบันทึกข้อมูลไปยังคลาวด์ได้: \${error.message}\`);
+  }
+}`,
+
+  // 12. ไฟล์แบ็กเอนด์ของ Google Apps Script เพื่อนำไปวางบนชีต
+  'google-apps-script.js': `/**
+ * =========================================================================
+ * 🌿ระบบบันทึกข้อมูลและอัปโหลดรูปภาพอัตโนมัติ (Smart Hydroponics Tracker Backend)
+ * =========================================================================
+ */
+const SHEET_ID = "1PLn_mokbdzBa7zN91im94LZlzUTqAr7SEiBtNOlQM9g";
+const DRIVE_FOLDER_ID = "1Gen2eZE9R7wYvHlhmb6k_ikYm5NyYAow";
+const SHEET_NAME = "Logs";
+
+function doGet(e) {
+  try {
+    const ss = SpreadsheetApp.openById(SHEET_ID);
+    const sheet = ss.getSheetByName(SHEET_NAME) || ss.getSheets()[0];
+    const data = sheet.getDataRange().getValues();
+    
+    return ContentService.createTextOutput(JSON.stringify({
+      status: "success",
+      data: data
+    })).setMimeType(ContentService.MimeType.JSON);
+    
+  } catch (err) {
+    return ContentService.createTextOutput(JSON.stringify({
+      status: "error",
+      message: err.toString()
+    })).setMimeType(ContentService.MimeType.JSON);
+  }
+}
+
+function doPost(e) {
+  try {
+    const payload = JSON.parse(e.postData.contents);
+    const ss = SpreadsheetApp.openById(SHEET_ID);
+    let sheet = ss.getSheetByName(SHEET_NAME) || ss.insertSheet(SHEET_NAME);
+
+    if (sheet.getLastRow() === 0) {
+      sheet.appendRow([
+        "วันเวลาบันทึก (Timestamp)", 
+        "รหัสรางปลูก (Rail ID)", 
+        "ค่า pH", 
+        "ค่า EC (mS/cm)", 
+        "อุณหภูมิน้ำ (°C)", 
+        "ระดับน้ำ (%)", 
+        "สภาพอากาศ", 
+        "รายละเอียดบันทึกเพิ่มเติม", 
+        "พิกัด GPS",
+        "เติมปุ๋ย AB (มล.)",
+        "เติม pH DOWN (มล.)",
+        "เติม pH UP (มล.)",
+        "เติมน้ำสะอาดเพิ่ม (ลิตร)",
+        "ค่า pH หลังปรับ",
+        "ค่า EC หลังปรับ (mS/cm)",
+        "ลิงก์รูปถ่ายประเมินโรคพืช"
+      ]);
+    }
+
+    if (payload.action === "saveLog" || !payload.action) {
+      let uploadedImageUrls = [];
+      if (payload.dailyPhotos && Array.isArray(payload.dailyPhotos)) {
+        payload.dailyPhotos.forEach((base64Str, index) => {
+          if (base64Str && base64Str.startsWith("data:image")) {
+            const fileName = \`img_\${payload.railId}_\${Date.now()}_\${index + 1}\`;
+            const fileUrl = uploadBase64ToDrive(base64Str, DRIVE_FOLDER_ID, fileName);
+            if (fileUrl) {
+              uploadedImageUrls.push(fileUrl);
+            }
+          }
+        });
+      }
+
+      const imageUrlsString = uploadedImageUrls.join(", ");
+
+      sheet.appendRow([
+        new Date(),
+        payload.railId || "ไม่ระบุราง",
+        payload.pH !== undefined ? payload.pH : "",
+        payload.ec !== undefined ? payload.ec : "",
+        payload.waterTemp !== undefined ? payload.waterTemp : "",
+        payload.waterLevel !== undefined ? payload.waterLevel : "",
+        payload.weather || "",
+        payload.notes || "",
+        payload.gps || "",
+        payload.addedAB || 0,
+        payload.addedPhDown || 0,
+        payload.addedPhUp || 0,
+        payload.addedWaterVolume || 0,
+        payload.afterPh !== undefined ? payload.afterPh : "",
+        payload.afterEc !== undefined ? payload.afterEc : "",
+        imageUrlsString
+      ]);
+
+      return ContentService.createTextOutput(JSON.stringify({
+        status: "success",
+        message: "บันทึกข้อมูลพารามิเตอร์น้ำสำเร็จเรียบร้อยแล้ว",
+        uploadedImagesCount: uploadedImageUrls.length
+      })).setMimeType(ContentService.MimeType.JSON);
+    }
+
+    return ContentService.createTextOutput(JSON.stringify({
+      status: "error",
+      message: "ไม่พบคำสั่ง action ที่ระบบรองรับ"
+    })).setMimeType(ContentService.MimeType.JSON);
+
+  } catch (err) {
+    return ContentService.createTextOutput(JSON.stringify({
+      status: "error",
+      message: err.toString()
+    })).setMimeType(ContentService.MimeType.JSON);
+  }
+}
+
+function uploadBase64ToDrive(base64Data, folderId, fileName) {
+  try {
+    const splitData = base64Data.split(',');
+    if (splitData.length < 2) return null;
+    
+    const metaHeader = splitData[0];
+    const rawBase64 = splitData[1];
+    
+    const mimeType = metaHeader.match(/:(.*?);/)[1];
+    let fileExtension = "jpg";
+    if (mimeType.includes("png")) fileExtension = "png";
+    if (mimeType.includes("gif")) fileExtension = "gif";
+    
+    const decodedBytes = Utilities.base64Decode(rawBase64);
+    const blob = Utilities.newBlob(decodedBytes, mimeType, \`\${fileName}.\${fileExtension}\`);
+    
+    const folder = DriveApp.getFolderById(folderId);
+    const file = folder.createFile(blob);
+    file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+    
+    return file.getUrl();
+  } catch (err) {
+    Logger.log("เกิดข้อผิดพลาดในการบันทึกรูป: " + err.toString());
+    return null;
+  }
+}`
+};
+
+// ซอร์สโค้ดของ src/App.jsx แบบเต็มรูปแบบและป้องกันการหลุดของ backticks
+const APP_JSX_CONTENT = `import React, { useState, useEffect } from 'react';
 
 const VEGETABLE_TYPES = [
   { id: 'green-oak', name: 'กรีนโอ๊ค (Green Oak)', cycleDays: 45, ecRange: [1.2, 1.6], pHRange: [5.5, 6.5] },
@@ -182,10 +533,10 @@ export default function App() {
     setFetchingGps(true);
     navigator.geolocation.getCurrentPosition(
       (position) => {
-        const coords = `${position.coords.latitude.toFixed(6)}, ${position.coords.longitude.toFixed(6)}`;
+        const coords = \`\${position.coords.latitude.toFixed(6)}, \${position.coords.longitude.toFixed(6)}\`;
         setCurrentGps(coords);
         setFetchingGps(false);
-        triggerAlert('success', `📍 ได้ดึงพิกัด GPS สำเร็จ: ${coords}`);
+        triggerAlert('success', \`📍 ได้ดึงพิกัด GPS สำเร็จ: \${coords}\`);
       },
       (error) => {
         setFetchingGps(false);
@@ -269,16 +620,16 @@ export default function App() {
 
     const nextSequence = lots.length > 0 ? Math.max(...lots.map(l => l.sequence)) + 1 : 1;
     const [year, month, day] = newLotSowedDate.split('-');
-    const formattedDate = `${day}/${month}/${year}`;
+    const formattedDate = \`\${day}/\${month}/\${year}\`;
 
     const primaryVegObj = VEGETABLE_TYPES.find(v => v.id === mainVegId);
     const primaryVegTh = primaryVegObj ? primaryVegObj.name.split(' ')[0] : 'สลัด';
-    const hasMore = additionalVegs.length > 0 ? ` +${additionalVegs.length} ชนิด` : '';
-    const constructedName = `ล็อตที่ #${nextSequence} (${primaryVegTh}${hasMore} - ${formattedDate})`;
+    const hasMore = additionalVegs.length > 0 ? \` +\${additionalVegs.length} ชนิด\` : '';
+    const constructedName = \`ล็อตที่ #\${nextSequence} (\${primaryVegTh}\${hasMore} - \${formattedDate})\`;
 
     const executeCreate = () => {
       const newLot = {
-        id: `lot-${Date.now()}`,
+        id: \`lot-\${Date.now()}\`,
         sequence: nextSequence,
         name: constructedName,
         vegetables: allVegsInLot,
@@ -295,12 +646,12 @@ export default function App() {
       setShowAddModal(false);
       setAdditionalVegs([]);
       setShowMultiVeg(false);
-      triggerAlert('success', `🌱 เพิ่มล็อตที่ #${nextSequence} ลงทะเบียนในระยะเริ่มเพาะสำเร็จแล้ว`);
+      triggerAlert('success', \`🌱 เพิ่มล็อตที่ #\${nextSequence} ลงทะเบียนในระยะเริ่มเพาะสำเร็จแล้ว\`);
     };
 
     requestConfirm(
       'ยืนยันการเริ่มล็อตใหม่',
-      `คุณต้องการจัดสร้างล็อตปลูก "${constructedName}" ประกอบด้วยผักจำนวนรวม ${totalQty} ต้น ใช่หรือไม่?`,
+      \`คุณต้องการจัดสร้างล็อตปลูก "\${constructedName}" ประกอบด้วยผักจำนวนรวม \${totalQty} ต้น ใช่หรือไม่?\`,
       executeCreate,
       'info',
       'ตกลงเริ่มเพาะผัก'
@@ -341,7 +692,7 @@ export default function App() {
 
     requestConfirm(
       'ยืนยันการแก้ไขข้อมูลล็อต',
-      `คุณต้องการอัปเดตการแก้ไขสำหรับล็อต "${editLotName}" ใช่หรือไม่?`,
+      \`คุณต้องการอัปเดตการแก้ไขสำหรับล็อต "\${editLotName}" ใช่หรือไม่?\`,
       executeSave,
       'warning',
       'บันทึกข้อมูลย่อย'
@@ -360,7 +711,7 @@ export default function App() {
 
     requestConfirm(
       '⚠️ ยืนยันการลบล็อตทิ้งถาวร',
-      `คุณกำลังจะลบล็อต "${targetLot.name}" ออกจากระบบ ข้อมูลพารามิเตอร์ทั้งหมดในล็อตจะสูญหายอย่างถาวร ต้องการลบใช่หรือไม่?`,
+      \`คุณกำลังจะลบล็อต "\${targetLot.name}" ออกจากระบบ ข้อมูลพารามิเตอร์ทั้งหมดในล็อตจะสูญหายอย่างถาวร ต้องการลบใช่หรือไม่?\`,
       executeDelete,
       'danger',
       'ลบถาวรทันที'
@@ -378,7 +729,7 @@ export default function App() {
             ...l,
             stage: 'culled',
             currentQty: 0,
-            notes: `${l.notes || ''} [คัดออกและปลดระวางพืชทั้งหมด วันที่ ${new Date().toLocaleDateString('th-TH')}]`
+            notes: \`\${l.notes || ''} [คัดออกและปลดระวางพืชทั้งหมด วันที่ \${new Date().toLocaleDateString('th-TH')}]\`
           };
         }
         return l;
@@ -389,7 +740,7 @@ export default function App() {
 
     requestConfirm(
       '🍂 ยืนยันการคัดทิ้งพืชยกแปลง',
-      `คุณต้องการทำรายการ "คัดทิ้งทั้งล็อต" สำหรับ "${targetLot.name}" ใช่หรือไม่? พืชในล็อตนี้จะไม่แสดงผลในหน้ารวมหลักของฟาร์มแต่จะถูกเก็บเข้าประวัติรายงานวิเคราะห์`,
+      \`คุณต้องการทำรายการ "คัดทิ้งทั้งล็อต" สำหรับ "\${targetLot.name}" ใช่หรือไม่? พืชในล็อตนี้จะไม่แสดงผลในหน้ารวมหลักของฟาร์มแต่จะถูกเก็บเข้าประวัติรายงานวิเคราะห์\`,
       executeCull,
       'danger',
       'ยืนยันการคัดทิ้งทั้งหมด'
@@ -407,7 +758,7 @@ export default function App() {
 
     const executeSaveLog = () => {
       const newLog = {
-        id: `log-${Date.now()}`,
+        id: \`log-\${Date.now()}\`,
         railId: selectedRailForLog,
         date: new Date().toISOString().split('T')[0],
         time: new Date().toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' }),
@@ -438,12 +789,12 @@ export default function App() {
       setAfterEc('');
       setShowChemicalAdditions(false);
 
-      triggerAlert('success', `💾 ได้บันทึกข้อมูลประจำวันของ ${targetRailName} เรียบร้อยแล้ว`);
+      triggerAlert('success', \`💾 ได้บันทึกข้อมูลประจำวันของ \${targetRailName} เรียบร้อยแล้ว\`);
     };
 
     requestConfirm(
       'บันทึกพารามิเตอร์คุณภาพน้ำ',
-      `ยืนยันการบันทึกค่าน้ำและการวิเคราะห์ประวัติสำหรับราง "${targetRailName}" ใช่หรือไม่?`,
+      \`ยืนยันการบันทึกค่าน้ำและการวิเคราะห์ประวัติสำหรับราง "\${targetRailName}" ใช่หรือไม่?\`,
       executeSaveLog,
       'info',
       'ตกลงบันทึกค่า'
@@ -479,7 +830,7 @@ export default function App() {
           }
           return l;
         }));
-        triggerAlert('success', `📸 บันทึกรูปผังที่ตั้งทางกายภาพของล็อตสำเร็จ (${source === 'camera' ? 'กล้องถ่ายภาพ' : 'คลังรูปถ่าย'})`);
+        triggerAlert('success', \`📸 บันทึกรูปผังที่ตั้งทางกายภาพของล็อตสำเร็จ (\${source === 'camera' ? 'กล้องถ่ายภาพ' : 'คลังรูปถ่าย'})\`);
       };
       reader.readAsDataURL(file);
     }
@@ -491,7 +842,7 @@ export default function App() {
       const reader = new FileReader();
       reader.onloadend = () => {
         setTempDailyPhotos(prev => [reader.result, ...prev]);
-        triggerAlert('success', `📸 เก็บภาพวิเคราะห์สุขภาพพืชไว้ชั่วคราวแล้ว (${source === 'camera' ? 'กล้องถ่ายภาพ' : 'คลังรูปถ่าย'})`);
+        triggerAlert('success', \`📸 เก็บภาพวิเคราะห์สุขภาพพืชไว้ชั่วคราวแล้ว (\${source === 'camera' ? 'กล้องถ่ายภาพ' : 'คลังรูปถ่าย'})\`);
       };
       reader.readAsDataURL(file);
     }
@@ -521,7 +872,7 @@ export default function App() {
             ...lot,
             stage: transitionStage,
             currentQty: Number(transitionForm.qty),
-            notes: `${lot.notes || ''} [สลับขั้นตอนสู่ระยะ: ${transitionStage} วันที่ ${transitionForm.date}: ${transitionForm.extraNotes}]`
+            notes: \`\${lot.notes || ''} [สลับขั้นตอนสู่ระยะ: \${transitionStage} วันที่ \${transitionForm.date}: \${transitionForm.extraNotes}]\`
           };
 
           if (transitionStage === 'nursery' || transitionStage === 'nft') {
@@ -540,13 +891,13 @@ export default function App() {
         return lot;
       }));
 
-      triggerAlert('success', `🚀 ย้ายสลับขั้นตอนผักของล็อตไปยังระยะ "${transitionStage}" เรียบร้อยแล้ว`);
+      triggerAlert('success', \`🚀 ย้ายสลับขั้นตอนผักของล็อตไปยังระยะ "\${transitionStage}" เรียบร้อยแล้ว\`);
       setActiveTransitionLot(null);
     };
 
     requestConfirm(
       'ยืนยันการย้ายสถานะเพาะเลี้ยง',
-      `คุณต้องการปรับเลื่อนขั้นการเจริญเติบโตของล็อตปลูก "${activeTransitionLot.name}" เข้าสู่ช่วงขั้นตอนถัดไปหรือไม่?`,
+      \`คุณต้องการปรับเลื่อนขั้นการเจริญเติบโตของล็อตปลูก "\${activeTransitionLot.name}" เข้าสู่ช่วงขั้นตอนถัดไปหรือไม่?\`,
       executeTransition,
       'info',
       'ยืนยันการอัปเดตสลับขั้น'
@@ -555,7 +906,7 @@ export default function App() {
 
   const handleGoogleSearchInGuide = () => {
     const query = guideSearchQuery.trim() || 'การปลูกผักสลัด ไฮโดรโปนิกส์ การรักษาโรคพืช';
-    const googleUrl = `https://www.google.com/search?q=${encodeURIComponent(query + ' ไฮโดรโปนิกส์ การป้องกันและรักษาศัตรูพืช')}`;
+    const googleUrl = \`https://www.google.com/search?q=\${encodeURIComponent(query + ' ไฮโดรโปนิกส์ การป้องกันและรักษาศัตรูพืช')}\`;
     window.open(googleUrl, '_blank');
     
     if (query && !viewedGuideHistory.some(h => h.title === query)) {
@@ -568,9 +919,9 @@ export default function App() {
 
   const handleHistorySearchClick = (term) => {
     setGuideSearchQuery(term);
-    const googleUrl = `https://www.google.com/search?q=${encodeURIComponent(term + ' ไฮโดรโปนิกส์ การป้องกันและรักษาศัตรูพืช')}`;
+    const googleUrl = \`https://www.google.com/search?q=\${encodeURIComponent(term + ' ไฮโดรโปนิกส์ การป้องกันและรักษาศัตรูพืช')}\`;
     window.open(googleUrl, '_blank');
-    triggerAlert('success', `🔍 เปิดลิงก์สืบค้นข้อมูลเชิงลึกของคำค้นหา "${term}" บน Google และระบบคลังเรียบร้อยแล้ว`);
+    triggerAlert('success', \`🔍 เปิดลิงก์สืบค้นข้อมูลเชิงลึกของคำค้นหา "\${term}" บน Google และระบบคลังเรียบร้อยแล้ว\`);
   };
 
   const handleDeleteHistoryItem = (e, idx) => {
@@ -588,31 +939,31 @@ export default function App() {
       const relatedLogs = dailyLogs.filter(log => log.railId === lotObj.railId).slice(0, 4);
 
       let logText = relatedLogs.length > 0 
-        ? relatedLogs.map(l => `- บันทึกวันที่ ${l.date} (${l.time} น.): pH=${l.pH}, EC=${l.ec} mS/cm, อุณหภูมิน้ำ=${l.waterTemp}°C, ระดับน้ำ=${l.waterLevel}%. (เคมีที่เพิ่ม: ปุ๋ย=${l.addedAB}มล., pH Down=${l.addedPhDown}มล., เติมน้ำ=${l.addedWaterVolume}ลิตร | หลังแก้ไข: pH=${l.afterPh || 'ไม่ได้บันทึก'}, EC=${l.afterEc || 'ไม่ได้บันทึก'}) พิกัด GPS: ${l.gps || 'ไม่มีข้อมูล'}`).join('\n')
+        ? relatedLogs.map(l => \`- บันทึกวันที่ \${l.date} (\${l.time} น.): pH=\${l.pH}, EC=\${l.ec} mS/cm, อุณหภูมิน้ำ=\${l.waterTemp}°C, ระดับน้ำ=\${l.waterLevel}%. (เคมีที่เพิ่ม: ปุ๋ย=\${l.addedAB}มล., pH Down=\${l.addedPhDown}มล., เติมน้ำ=\${l.addedWaterVolume}ลิตร | หลังแก้ไข: pH=\${l.afterPh || 'ไม่ได้บันทึก'}, EC=\${l.afterEc || 'ไม่ได้บันทึก'}) พิกัด GPS: \${l.gps || 'ไม่มีข้อมูล'}\`).join('\\n')
         : '- ไม่พบบันทึกค่าน้ำย้อนหลังที่เกี่ยวข้องในรางปลูกนี้ของสัปดาห์นี้';
 
       const vegsSummary = lotObj.vegetables 
         ? lotObj.vegetables.map(item => {
             const staticObj = VEGETABLE_TYPES.find(v => v.id === item.id);
-            return `- ${staticObj?.name || item.id}: จำนวนตั้งต้น ${item.qty} เมล็ด`;
-          }).join('\n')
-        : `- สายพันธุ์ผัก: สลัดไฮโดรโปนิกส์`;
+            return \`- \${staticObj?.name || item.id}: จำนวนตั้งต้น \${item.qty} เมล็ด\`;
+          }).join('\\n')
+        : \`- สายพันธุ์ผัก: สลัดไฮโดรโปนิกส์\`;
 
-      const prompt = `[รายละเอียดข้อมูลพารามิเตอร์ล็อตพืช]
-- ชื่อล็อตปลูก: ${lotObj.name}
+      const prompt = \`[รายละเอียดข้อมูลพารามิเตอร์ล็อตพืช]
+- ชื่อล็อตปลูก: \${lotObj.name}
 - ประวัติสายพันธุ์ผักในรุ่น:
-${vegsSummary}
-- วันเวลาเริ่มเพาะเมล็ด: ${lotObj.sowedDate}
-- สีของถ้วยปลูกระบุแปลงย่อย: ${lotObj.cupColor || 'ไม่มีสีระบุ'}
-- รางปลูกปัจจุบัน: ${railObj?.name || 'ไม่ได้อยู่บนราง / อยู่ขั้นตอนก่อนหน้า'}
-- ยอดเมล็ดเริ่มปลูกสะสม: ${lotObj.sowedQty} ต้น | ยอดมีชีวิตล่าสุด: ${lotObj.currentQty} ต้น
-- ระดับสถานะ: ${lotObj.stage}
+\${vegsSummary}
+- วันเวลาเริ่มเพาะเมล็ด: \${lotObj.sowedDate}
+- สีของถ้วยปลูกระบุแปลงย่อย: \${lotObj.cupColor || 'ไม่มีสีระบุ'}
+- รางปลูกปัจจุบัน: \${railObj?.name || 'ไม่ได้อยู่บนราง / อยู่ขั้นตอนก่อนหน้า'}
+- ยอดเมล็ดเริ่มปลูกสะสม: \${lotObj.sowedQty} ต้น | ยอดมีชีวิตล่าสุด: \${lotObj.currentQty} ต้น
+- ระดับสถานะ: \${lotObj.stage}
 
 [ประวัติบันทึกคุณภาพน้ำและระบบตรวจโรคในรางปลูก]
-${logText}
+\${logText}
 
 [คำขอวิเคราะห์สำหรับ AI]
-ผมได้แนบภาพประวัติพิกัดตำแหน่งล็อต และรูปถ่ายปัญหาบริเวณพุ่มใบ/ระบบรากมาพร้อมกับชุดคำสั่งนี้ ช่วยประเมินอาการขอบใบไหม้ (Tip burn), ตรวจสัญญาณรากเน่าจากเชื้อรา (Pythium), และวิเคราะห์ความเหมาะสมของช่วงอุณหภูมิน้ำตามพิกัด GPS เพื่อปรับปรุงสูตรสารอาหารให้ดีขึ้นด้วยครับ`;
+ผมได้แนบภาพประวัติพิกัดตำแหน่งล็อต และรูปถ่ายปัญหาบริเวณพุ่มใบ/ระบบรากมาพร้อมกับชุดคำสั่งนี้ ช่วยประเมินอาการขอบใบไหม้ (Tip burn), ตรวจสัญญาณรากเน่าจากเชื้อรา (Pythium), และวิเคราะห์ความเหมาะสมของช่วงอุณหภูมิน้ำตามพิกัด GPS เพื่อปรับปรุงสูตรสารอาหารให้ดีขึ้นด้วยครับ\`;
 
       setAiReportText(prompt);
       setCopiedPrompt(false);
@@ -752,11 +1103,11 @@ ${logText}
       {/* BANNER NOTIFICATION */}
       {alertMsg.text && (
         <div className="max-w-7xl mx-auto px-4 pt-4">
-          <div className={`p-4 rounded-xl border-2 flex items-center justify-between shadow-md transition-all duration-300 text-base sm:text-lg font-bold ${
+          <div className={\`p-4 rounded-xl border-2 flex items-center justify-between shadow-md transition-all duration-300 text-base sm:text-lg font-bold \${
             alertMsg.type === 'success' ? 'bg-emerald-50 text-emerald-900 border-emerald-300' :
             alertMsg.type === 'warning' ? 'bg-amber-50 text-amber-900 border-amber-300' :
             'bg-rose-50 text-rose-900 border-rose-300'
-          }`}>
+          }\`}>
             <div className="flex items-center space-x-2.5">
               <span className="text-xl sm:text-2xl">{alertMsg.type === 'success' ? '✅' : alertMsg.type === 'warning' ? '⚠️' : '❌'}</span>
               <p className="leading-tight">{alertMsg.text}</p>
@@ -773,41 +1124,41 @@ ${logText}
         <div className="flex border-b-2 border-slate-200 overflow-x-auto pb-2.5 mb-6 scrollbar-hide space-x-2 bg-white p-2.5 rounded-2xl shadow-sm">
           <button
             onClick={() => setActiveTab('daily-record')}
-            className={`py-3 px-5 sm:px-6 font-extrabold text-sm sm:text-base md:text-lg rounded-xl transition-all whitespace-nowrap flex items-center space-x-2 ${
+            className={\`py-3 px-5 sm:px-6 font-extrabold text-sm sm:text-base md:text-lg rounded-xl transition-all whitespace-nowrap flex items-center space-x-2 \${
               activeTab === 'daily-record' ? 'bg-emerald-600 text-white shadow-md' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
-            }`}
+            }\`}
           >
             📝 บันทึกประจำวัน
           </button>
           <button
             onClick={() => setActiveTab('lots')}
-            className={`py-3 px-5 sm:px-6 font-extrabold text-sm sm:text-base md:text-lg rounded-xl transition-all whitespace-nowrap flex items-center space-x-2 ${
+            className={\`py-3 px-5 sm:px-6 font-extrabold text-sm sm:text-base md:text-lg rounded-xl transition-all whitespace-nowrap flex items-center space-x-2 \${
               activeTab === 'lots' ? 'bg-emerald-600 text-white shadow-md' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
-            }`}
+            }\`}
           >
             📋 จัดการล็อต
           </button>
           <button
             onClick={() => setActiveTab('ai-report')}
-            className={`py-3 px-5 sm:px-6 font-extrabold text-sm sm:text-base md:text-lg rounded-xl transition-all whitespace-nowrap flex items-center space-x-2 ${
+            className={\`py-3 px-5 sm:px-6 font-extrabold text-sm sm:text-base md:text-lg rounded-xl transition-all whitespace-nowrap flex items-center space-x-2 \${
               activeTab === 'ai-report' ? 'bg-emerald-600 text-white shadow-md' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
-            }`}
+            }\`}
           >
             📸 ส่งรายงาน AI
           </button>
           <button
             onClick={() => setActiveTab('dashboard')}
-            className={`py-3 px-5 sm:px-6 font-extrabold text-sm sm:text-base md:text-lg rounded-xl transition-all whitespace-nowrap flex items-center space-x-2 ${
+            className={\`py-3 px-5 sm:px-6 font-extrabold text-sm sm:text-base md:text-lg rounded-xl transition-all whitespace-nowrap flex items-center space-x-2 \${
               activeTab === 'dashboard' ? 'bg-emerald-600 text-white shadow-md' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
-            }`}
+            }\`}
           >
             📊 แผงสรุปผล
           </button>
           <button
             onClick={() => setActiveTab('guide')}
-            className={`py-3 px-5 sm:px-6 font-extrabold text-sm sm:text-base md:text-lg rounded-xl transition-all whitespace-nowrap flex items-center space-x-2 ${
+            className={\`py-3 px-5 sm:px-6 font-extrabold text-sm sm:text-base md:text-lg rounded-xl transition-all whitespace-nowrap flex items-center space-x-2 \${
               activeTab === 'guide' ? 'bg-emerald-600 text-white shadow-md' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
-            }`}
+            }\`}
           >
             💡 คู่มือพืช
           </button>
@@ -930,7 +1281,7 @@ ${logText}
                       className="w-full rounded-xl border-2 border-slate-200 p-3 font-mono font-bold text-base sm:text-lg focus:outline-none focus:border-emerald-500"
                     />
                     <span className="text-xs text-slate-500 block font-semibold">
-                      ปริมาตรคงเหลือ: ประมาณ ${((RAILS.find(r => r.id === selectedRailForLog)?.capacity || 140) * Number(logWaterLevel) / 100).toFixed(1)} ลิตร
+                      ปริมาตรคงเหลือ: ประมาณ \${((RAILS.find(r => r.id === selectedRailForLog)?.capacity || 140) * Number(logWaterLevel) / 100).toFixed(1)} ลิตร
                     </span>
                   </div>
                 </div>
@@ -1030,9 +1381,9 @@ ${logText}
                         key={val}
                         type="button"
                         onClick={() => setLogWeather(val)}
-                        className={`p-2 rounded-lg text-xs sm:text-sm font-bold border-2 transition-all ${
+                        className={\`p-2 rounded-lg text-xs sm:text-sm font-bold border-2 transition-all \${
                           logWeather === val ? 'bg-emerald-50 border-emerald-500 text-emerald-800' : 'bg-white border-slate-200 text-slate-600'
-                        }`}
+                        }\`}
                       >
                         {label}
                       </button>
@@ -1069,7 +1420,7 @@ ${logText}
 
                   {tempDailyPhotos.length > 0 && (
                     <div className="mt-3 space-y-1.5">
-                      <p className="text-xs font-bold text-sky-900">รูปตรวจวิเคราะห์โรคที่เตรียมแนบ (${tempDailyPhotos.length} รูป):</p>
+                      <p className="text-xs font-bold text-sky-900">รูปตรวจวิเคราะห์โรคที่เตรียมแนบ (\${tempDailyPhotos.length} รูป):</p>
                       <div className="flex gap-2 overflow-x-auto py-1">
                         {tempDailyPhotos.map((img, i) => (
                           <div key={i} className="relative flex-shrink-0">
@@ -1208,7 +1559,7 @@ ${logText}
                       <div className="space-y-1.5 bg-slate-50 p-3 rounded-xl border">
                         <p className="font-bold text-[11px] text-slate-505">📍 ข้อมูลการติดตั้งบนรางปลูก:</p>
                         <p className="text-slate-800 font-extrabold text-xs sm:text-sm">
-                          {currentRailObj ? `✓ ${currentRailObj.name}` : 'ยังไม่ได้ลงรางปลูก (อยู่ในช่วงเตรียมเพาะ)'}
+                          {currentRailObj ? \`✓ \${currentRailObj.name}\` : 'ยังไม่ได้ลงรางปลูก (อยู่ในช่วงเตรียมเพาะ)'}
                         </p>
                         {lot.cupColor && (
                           <div className="flex items-center space-x-1.5 mt-1">
@@ -1383,8 +1734,8 @@ ${logText}
                               return;
                             }
 
-                            const textWithImages = `[รูปภาพทั้งหมดของล็อตปลูก ${selectedLot?.name}]\n` +
-                              allImages.map((img, index) => `รูปที่ ${index + 1}: ${img.substring(0, 150)}... [ภาพข้อมูลเข้ารหัส]`).join('\n');
+                            const textWithImages = \`[รูปภาพทั้งหมดของล็อตปลูก \${selectedLot?.name}]\\n\` +
+                              allImages.map((img, index) => \`รูปที่ \${index + 1}: \${img.substring(0, 150)}... [ภาพข้อมูลเข้ารหัส]\`).join('\\n');
 
                             const textArea = document.createElement("textarea");
                             textArea.value = textWithImages;
@@ -1393,7 +1744,7 @@ ${logText}
                             document.execCommand('copy');
                             document.body.removeChild(textArea);
                             
-                            triggerAlert('success', `📋 คัดลอกรูปถ่ายทั้งหมดจำนวน ${allImages.length} รายการลงคลิปบอร์ดแล้ว คุณสามารถแนบวางส่งเข้าช่องแชท AI เพื่อประมวลผลทันที`);
+                            triggerAlert('success', \`📋 คัดลอกรูปถ่ายทั้งหมดจำนวน \${allImages.length} รายการลงคลิปบอร์ดแล้ว คุณสามารถแนบวางส่งเข้าช่องแชท AI เพื่อประมวลผลทันที\`);
                           }}
                           className="bg-sky-700 hover:bg-sky-800 text-white font-extrabold py-2 px-3 rounded-lg text-xs transition"
                         >
@@ -1514,7 +1865,7 @@ ${logText}
                               fill="transparent"
                               stroke={seg.color}
                               strokeWidth="8"
-                              strokeDasharray={`${seg.strokeLength} ${svgCircumference}`}
+                              strokeDasharray={\`\${seg.strokeLength} \${svgCircumference}\`}
                               strokeDashoffset={seg.strokeOffset}
                               strokeLinecap="round"
                             />
@@ -1584,14 +1935,14 @@ ${logText}
                           </td>
                           <td className="py-4 px-5 font-mono">{lot.sowedDate}</td>
                           <td className="py-4 px-5">
-                            <span className={`px-2.5 py-1 rounded-xl text-xs font-bold ${
+                            <span className={\`px-2.5 py-1 rounded-xl text-xs font-bold \${
                               lot.stage === 'tissue' ? 'bg-amber-50 text-amber-800' :
                               lot.stage === 'sponge' ? 'bg-sky-50 text-sky-800' :
                               lot.stage === 'nursery' ? 'bg-indigo-50 text-indigo-800' :
                               lot.stage === 'nft' ? 'bg-emerald-50 text-emerald-800' :
                               lot.stage === 'culled' ? 'bg-rose-50 text-rose-800' :
                               'bg-violet-50 text-violet-800'
-                            }`}>
+                            }\`}>
                               {lot.stage === 'tissue' ? '1.เพาะทิชชู่' :
                                lot.stage === 'sponge' ? '2.ลงโฟมเพาะ' :
                                lot.stage === 'nursery' ? '3.รางอนุบาล 1' :
@@ -2049,18 +2400,18 @@ ${logText}
               <button
                 type="button"
                 onClick={() => setEditTab('current')}
-                className={`flex-1 py-2 text-center rounded-lg transition ${
+                className={\`flex-1 py-2 text-center rounded-lg transition \${
                   editTab === 'current' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-850'
-                }`}
+                }\`}
               >
                 1. แก้ไขข้อมูลปัจจุบัน
               </button>
               <button
                 type="button"
                 onClick={() => setEditTab('stage')}
-                className={`flex-1 py-2 text-center rounded-lg transition ${
+                className={\`flex-1 py-2 text-center rounded-lg transition \${
                   editTab === 'stage' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-850'
-                }`}
+                }\`}
               >
                 2. ย้อนสถานะการปลูก
               </button>
@@ -2315,11 +2666,11 @@ ${logText}
               <button
                 type="button"
                 onClick={customConfirm.onConfirm}
-                className={`px-5 py-2.5 text-white rounded-xl shadow-md ${
+                className={\`px-5 py-2.5 text-white rounded-xl shadow-md \${
                   customConfirm.type === 'danger' ? 'bg-rose-600 hover:bg-rose-700' :
                   customConfirm.type === 'info' ? 'bg-sky-600 hover:bg-sky-700' :
                   'bg-amber-600 hover:bg-amber-700'
-                }`}
+                }\`}
               >
                 {customConfirm.confirmText}
               </button>
@@ -2332,3 +2683,23 @@ ${logText}
     </div>
   );
 }
+`;
+
+// เขียนทับและสร้างไฟล์ทั้งหมดในลูปเดียว
+Object.keys(files).forEach(filePath => {
+  fs.writeFileSync(filePath, files[filePath], 'utf-8');
+  console.log(`📄 สร้างไฟล์คอนฟิกสำเร็จ: ${filePath}`);
+});
+
+// เขียนข้อมูล App.jsx ตัวเต็ม
+fs.writeFileSync('src/App.jsx', APP_JSX_CONTENT, 'utf-8');
+console.log("📄 สร้างไฟล์หน้าจอหลักสำเร็จ: src/App.jsx");
+
+console.log("\n========================================================================");
+console.log("✅ [การติดตั้งไฟล์เสร็จสิ้นสมบูรณ์] โปรเจกต์ไฮโดรโปนิกส์ของคุณพร้อมใช้งานแล้ว!");
+console.log("========================================================================");
+console.log("👉 ขั้นตอนการเริ่มรันหน้าจอเว็บแอปบนคอมพิวเตอร์ของคุณ:");
+console.log("   1. เปิดโปรแกรม Terminal หรือ Command Prompt ในโฟลเดอร์นี้");
+console.log("   2. พิมพ์คำสั่ง: npm install      (เพื่อดาวน์โหลดและติดตั้งไลบรารี)");
+console.log("   3. พิมพ์คำสั่ง: npm run dev      (เพื่อเปิดหน้าจอเว็บแอปพลิเคชัน)");
+console.log("========================================================================\n");
