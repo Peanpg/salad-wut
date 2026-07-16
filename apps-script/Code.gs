@@ -8,9 +8,13 @@ const DAILY_ROOT_FOLDER_ID = '10x7hq8tR9k6YpAnm26xViERK32XYXBNZ';
 const LOTS_SHEET = 'Lots';
 const LOGS_SHEET = 'DailyLogs';
 
-function doGet() {
+function doGet(e) {
   try {
     ensureStructure_();
+
+    if (e && e.parameter && e.parameter.test === 'drive') {
+      return json_(testDriveAccess_());
+    }
     return json_({
       status: 'success',
       lots: readCollection_(LOTS_SHEET),
@@ -60,6 +64,36 @@ function authorizeSetup() {
   ensureStructure_();
   console.log('Authorized: ' + ss.getName() + ' / ' + lotRoot.getName() + ' / ' + dailyRoot.getName());
   return 'Authorization completed';
+}
+
+
+/**
+ * ทดสอบสิทธิ์ของ Web App deployment จริงผ่าน URL:
+ * .../exec?test=drive
+ */
+function testDriveAccess_() {
+  const lotRoot = DriveApp.getFolderById(LOT_ROOT_FOLDER_ID);
+  const dailyRoot = DriveApp.getFolderById(DAILY_ROOT_FOLDER_ID);
+  return {
+    status: 'success',
+    driveAuthorized: true,
+    lotFolder: lotRoot.getName(),
+    lotFolderId: lotRoot.getId(),
+    dailyFolder: dailyRoot.getName(),
+    dailyFolderId: dailyRoot.getId(),
+    serverTime: new Date().toISOString()
+  };
+}
+
+/** Run from the editor to test creating and trashing a tiny file. */
+function testUploadPermission() {
+  const root = DriveApp.getFolderById(DAILY_ROOT_FOLDER_ID);
+  const folder = getOrCreateChildFolder_(root, 'permission-test');
+  const file = folder.createFile(Utilities.newBlob('ok', 'text/plain', 'permission-test.txt'));
+  const result = { fileId: file.getId(), folderId: folder.getId(), fileName: file.getName() };
+  file.setTrashed(true);
+  console.log(JSON.stringify(result));
+  return result;
 }
 
 function uploadPhoto_(payload) {
@@ -197,10 +231,8 @@ function formatThaiDateFolder_(date) {
 
 function errorMessage_(error) {
   const message = String(error && error.message || error);
-  if (/DriveApp|getFolderById|authorization|permission/i.test(message)) {
-    return 'Google Apps Script ยังไม่ได้รับสิทธิ์เข้าถึง Drive หรือไม่มีสิทธิ์ในโฟลเดอร์ กรุณารัน authorizeSetup() แล้ว Deploy เวอร์ชันใหม่: ' + message;
-  }
-  return message;
+  const name = String(error && error.name || 'Error');
+  return name + ': ' + message;
 }
 
 function json_(data) {

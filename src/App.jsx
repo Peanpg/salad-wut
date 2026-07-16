@@ -30,7 +30,7 @@ const writeLocalJson = (key, value) => {
 };
 
 
-const compressImageToDataUrl = (file, maxSize = 1600, quality = 0.82) => new Promise((resolve, reject) => {
+const compressImageToDataUrl = (file, maxSize = 1200, quality = 0.72) => new Promise((resolve, reject) => {
   if (!file || !file.type?.startsWith('image/')) {
     reject(new Error('กรุณาเลือกไฟล์รูปภาพเท่านั้น'));
     return;
@@ -630,8 +630,17 @@ export default function App() {
       })
     });
 
-    if (!response.ok) throw new Error(`HTTP status ${response.status}`);
-    const result = await response.json();
+    const responseText = await response.text();
+    let result;
+    try {
+      result = JSON.parse(responseText);
+    } catch (parseError) {
+      throw new Error(`Apps Script ตอบกลับไม่ใช่ JSON (HTTP ${response.status}): ${responseText.slice(0, 300)}`);
+    }
+
+    if (!response.ok) {
+      throw new Error(result.message || `HTTP status ${response.status}`);
+    }
     if (result.status !== 'success' || !result.url) {
       throw new Error(result.message || 'อัปโหลดรูปไป Google Drive ไม่สำเร็จ');
     }
@@ -670,9 +679,7 @@ export default function App() {
       console.error('Location photo upload error:', error);
       setConnectionStatus('error');
       const message = String(error.message || error);
-      triggerAlert('danger', message.includes('DriveApp') || message.includes('authorization')
-        ? '❌ Apps Script ยังไม่ได้รับสิทธิ์ Google Drive กรุณารัน authorizeSetup() และ Deploy เวอร์ชันใหม่'
-        : `❌ อัปโหลดรูปไม่สำเร็จ: ${message}`);
+      triggerAlert('danger', `❌ อัปโหลดรูปไม่สำเร็จ: ${message}`);
     } finally {
       setUploadingPhoto(false);
     }
@@ -699,9 +706,7 @@ export default function App() {
       console.error('Daily photo upload error:', error);
       setConnectionStatus('error');
       const message = String(error.message || error);
-      triggerAlert('danger', message.includes('DriveApp') || message.includes('authorization')
-        ? '❌ Apps Script ยังไม่ได้รับสิทธิ์ Google Drive กรุณารัน authorizeSetup() และ Deploy เวอร์ชันใหม่'
-        : `❌ อัปโหลดรูปไม่สำเร็จ: ${message}`);
+      triggerAlert('danger', `❌ อัปโหลดรูปไม่สำเร็จ: ${message}`);
     } finally {
       setUploadingPhoto(false);
     }
