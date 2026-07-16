@@ -72,7 +72,16 @@ export default function App() {
 });
   const [connectionStatus, setConnectionStatus] = useState('offline'); // 'offline' | 'connecting' | 'connected' | 'error'
   const [showConfigModal, setShowConfigModal] = useState(false);
-  const [inputUrl, setInputUrl] = useState(appsScriptUrl);
+  const [inputUrl, setInputUrl] = useState(() => {
+  try {
+    return (
+      window.localStorage.getItem(STORAGE_KEYS.scriptUrl) ||
+      DEFAULT_APPS_SCRIPT_URL
+    );
+  } catch {
+    return DEFAULT_APPS_SCRIPT_URL;
+  }
+});
 
   useEffect(() => {
     writeLocalJson(STORAGE_KEYS.lots, lots);
@@ -244,12 +253,17 @@ export default function App() {
   };
 
   const handleClearConfig = () => {
+  try {
     window.localStorage.removeItem(STORAGE_KEYS.scriptUrl);
-    setInputUrl('');
-    setAppsScriptUrl('');
-    setConnectionStatus('offline');
-    triggerAlert('warning', 'ล้าง URL เชื่อมต่อเดิมแล้ว');
-  };
+  } catch (error) {
+    console.error('ล้าง URL ไม่สำเร็จ', error);
+  }
+
+  setAppsScriptUrl(DEFAULT_APPS_SCRIPT_URL);
+  setInputUrl(DEFAULT_APPS_SCRIPT_URL);
+  setConnectionStatus('connecting');
+  triggerAlert('success', 'คืนค่า URL เชื่อมต่อหลักแล้ว');
+};
 
   const [currentGps, setCurrentGps] = useState('');
   const [fetchingGps, setFetchingGps] = useState(false);
