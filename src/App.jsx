@@ -60,8 +60,16 @@ export default function App() {
   const [viewedGuideHistory, setViewedGuideHistory] = useState(() => readLocalJson(STORAGE_KEYS.guideHistory, []));
 
   const [appsScriptUrl, setAppsScriptUrl] = useState(() => {
-    return window.localStorage.getItem(STORAGE_KEYS.scriptUrl) || '';
-  });
+  try {
+    return (
+      window.localStorage.getItem(STORAGE_KEYS.scriptUrl) ||
+      DEFAULT_APPS_SCRIPT_URL
+    );
+  } catch (error) {
+    console.warn('อ่าน Apps Script URL ไม่สำเร็จ', error);
+    return DEFAULT_APPS_SCRIPT_URL;
+  }
+});
   const [connectionStatus, setConnectionStatus] = useState('offline'); // 'offline' | 'connecting' | 'connected' | 'error'
   const [showConfigModal, setShowConfigModal] = useState(false);
   const [inputUrl, setInputUrl] = useState(appsScriptUrl);
