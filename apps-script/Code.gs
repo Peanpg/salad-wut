@@ -3,7 +3,8 @@
  * Deploy as Web app: Execute as Me, Who has access: Anyone
  */
 const SPREADSHEET_ID = '1PLn_mokbdzBa7zN91im94LZlzUTqAr7SEiBtNOlQM9g';
-const DRIVE_FOLDER_ID = '1Gen2eZE9R7wYvHlhmb6k_ikYm5NyYAow';
+const LOT_ROOT_FOLDER_ID = '1SG36rSPctUX_kSJ2QARSD-Gha7gcbI6d';
+const DAILY_ROOT_FOLDER_ID = '10x7hq8tR9k6YpAnm26xViERK32XYXBNZ';
 const LOTS_SHEET = 'Lots';
 const LOGS_SHEET = 'DailyLogs';
 
@@ -17,7 +18,7 @@ function doGet() {
       serverTime: new Date().toISOString()
     });
   } catch (error) {
-    return json_({ status: 'error', message: String(error && error.message || error) });
+    return json_({ status: 'error', message: errorMessage_(error) });
   }
 }
 
@@ -25,26 +26,68 @@ function doPost(e) {
   const lock = LockService.getScriptLock();
   try {
     lock.waitLock(30000);
-    ensureStructure_();
     const body = e && e.postData && e.postData.contents ? e.postData.contents : '{}';
     const payload = JSON.parse(body);
+
+    if (payload.action === 'uploadPhoto') {
+      return json_(uploadPhoto_(payload));
+    }
 
     if (payload.action !== 'syncAll') {
       throw new Error('Unsupported action: ' + (payload.action || 'missing'));
     }
 
-    const lots = normalizeAndUploadPhotos_(Array.isArray(payload.lots) ? payload.lots : [], 'lot');
-    const logs = normalizeAndUploadPhotos_(Array.isArray(payload.logs) ? payload.logs : [], 'log');
+    ensureStructure_();
+    const lots = normalizeLotPhotos_(Array.isArray(payload.lots) ? payload.lots : []);
+    const logs = normalizeDailyPhotos_(Array.isArray(payload.logs) ? payload.logs : []);
 
     writeCollection_(LOTS_SHEET, lots);
     writeCollection_(LOGS_SHEET, logs);
 
     return json_({ status: 'success', lots: lots, logs: logs, savedAt: new Date().toISOString() });
   } catch (error) {
-    return json_({ status: 'error', message: String(error && error.message || error) });
+    return json_({ status: 'error', message: errorMessage_(error) });
   } finally {
     try { lock.releaseLock(); } catch (_) {}
   }
+}
+
+/** Run this once in Apps Script editor, approve permissions, then deploy a new version. */
+function authorizeSetup() {
+  const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+  const lotRoot = DriveApp.getFolderById(LOT_ROOT_FOLDER_ID);
+  const dailyRoot = DriveApp.getFolderById(DAILY_ROOT_FOLDER_ID);
+  ensureStructure_();
+  console.log('Authorized: ' + ss.getName() + ' / ' + lotRoot.getName() + ' / ' + dailyRoot.getName());
+  return 'Authorization completed';
+}
+
+function uploadPhoto_(payload) {
+  const photoType = String(payload.photoType || '');
+  const dataUrl = String(payload.dataUrl || '');
+  if (dataUrl.indexOf('data:image/') !== 0) throw new Error('ไม่พบข้อมูลรูปภาพที่ถูกต้อง');
+
+  let rootFolder;
+  let subFolderName;
+  if (photoType === 'lot') {
+    rootFolder = DriveApp.getFolderById(LOT_ROOT_FOLDER_ID);
+    subFolderName = sanitizeName_(payload.lotFolderName || 'lot-unknown');
+  } else if (photoType === 'daily') {
+    rootFolder = DriveApp.getFolderById(DAILY_ROOT_FOLDER_ID);
+    subFolderName = sanitizeName_(payload.dateFolderName || formatThaiDateFolder_(new Date()));
+  } else {
+    throw new Error('photoType ต้องเป็น lot หรือ daily');
+  }
+
+  const targetFolder = getOrCreateChildFolder_(rootFolder, subFolderName);
+  const result = saveDataUrlToFolder_(dataUrl, targetFolder, payload.originalName || 'photo.jpg');
+  return {
+    status: 'success',
+    url: result.url,
+    fileId: result.fileId,
+    folderId: targetFolder.getId(),
+    folderName: subFolderName
+  };
 }
 
 function ensureStructure_() {
@@ -81,42 +124,83 @@ function writeCollection_(sheetName, items) {
   sheet.getRange(2, 1, rows.length, 3).setValues(rows);
 }
 
-function normalizeAndUploadPhotos_(items, prefix) {
+function normalizeLotPhotos_(items) {
   return items.map(function(item) {
     const cloned = JSON.parse(JSON.stringify(item));
-    if (Array.isArray(cloned.locationPhotos)) {
-      cloned.locationPhotos = cloned.locationPhotos.map(function(value, i) {
-        return saveDataUrlIfNeeded_(value, prefix + '-location-' + i);
-      });
-    }
-    if (Array.isArray(cloned.dailyPhotos)) {
-      cloned.dailyPhotos = cloned.dailyPhotos.map(function(value, i) {
-        return saveDataUrlIfNeeded_(value, prefix + '-daily-' + i);
-      });
-    }
+    if (!Array.isArray(cloned.locationPhotos)) return cloned;
+    const root = DriveApp.getFolderById(LOT_ROOT_FOLDER_ID);
+    const folder = getOrCreateChildFolder_(root, sanitizeName_('lot' + (cloned.sequence || cloned.id || 'unknown')));
+    cloned.locationPhotos = cloned.locationPhotos.map(function(value, i) {
+      if (typeof value !== 'string' || value.indexOf('data:image/') !== 0) return value;
+      return saveDataUrlToFolder_(value, folder, 'location-' + (i + 1) + '.jpg').url;
+    });
     return cloned;
   });
 }
 
-function saveDataUrlIfNeeded_(value, namePrefix) {
-  if (typeof value !== 'string' || value.indexOf('data:image/') !== 0) return value;
-  const match = value.match(/^data:(image\/[a-zA-Z0-9.+-]+);base64,(.+)$/);
-  if (!match) return value;
+function normalizeDailyPhotos_(items) {
+  return items.map(function(item) {
+    const cloned = JSON.parse(JSON.stringify(item));
+    if (!Array.isArray(cloned.dailyPhotos)) return cloned;
+    const root = DriveApp.getFolderById(DAILY_ROOT_FOLDER_ID);
+    const date = cloned.date ? new Date(cloned.date + 'T00:00:00') : new Date();
+    const folder = getOrCreateChildFolder_(root, formatThaiDateFolder_(date));
+    cloned.dailyPhotos = cloned.dailyPhotos.map(function(value, i) {
+      if (typeof value !== 'string' || value.indexOf('data:image/') !== 0) return value;
+      return saveDataUrlToFolder_(value, folder, 'daily-' + (i + 1) + '.jpg').url;
+    });
+    return cloned;
+  });
+}
 
+function saveDataUrlToFolder_(dataUrl, folder, originalName) {
+  const match = dataUrl.match(/^data:(image\/[a-zA-Z0-9.+-]+);base64,(.+)$/);
+  if (!match) throw new Error('รูปภาพ Base64 ไม่ถูกต้อง');
   const mimeType = match[1];
   const extension = mimeType.split('/')[1].replace('jpeg', 'jpg');
+  const safeBase = sanitizeName_(String(originalName || 'photo').replace(/\.[^.]+$/, '')) || 'photo';
+  const filename = safeBase + '-' + Utilities.formatDate(new Date(), 'Asia/Bangkok', 'yyyyMMdd-HHmmss-SSS') + '.' + extension;
   const bytes = Utilities.base64Decode(match[2]);
-  const blob = Utilities.newBlob(bytes, mimeType, namePrefix + '-' + Date.now() + '.' + extension);
-  const folder = DriveApp.getFolderById(DRIVE_FOLDER_ID);
+  const blob = Utilities.newBlob(bytes, mimeType, filename);
   const file = folder.createFile(blob);
 
   try {
     file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
   } catch (_) {
-    // Workspace บางองค์กรปิดการแชร์สาธารณะไว้ ไฟล์ยังคงถูกบันทึกในโฟลเดอร์ที่กำหนด
+    // If public sharing is disabled by an organization, the file is still saved.
   }
 
-  return 'https://drive.google.com/thumbnail?id=' + file.getId() + '&sz=w1200';
+  return {
+    fileId: file.getId(),
+    url: 'https://drive.google.com/thumbnail?id=' + file.getId() + '&sz=w1600'
+  };
+}
+
+function getOrCreateChildFolder_(parent, name) {
+  const folders = parent.getFoldersByName(name);
+  return folders.hasNext() ? folders.next() : parent.createFolder(name);
+}
+
+function sanitizeName_(value) {
+  return String(value || '')
+    .trim()
+    .replace(/[\\/:*?"<>|#%{}~&]/g, '-')
+    .replace(/\s+/g, '-')
+    .replace(/-+/g, '-')
+    .substring(0, 80) || 'untitled';
+}
+
+function formatThaiDateFolder_(date) {
+  const year = (date.getFullYear() + 543) % 100;
+  return date.getDate() + '-' + (date.getMonth() + 1) + '-' + ('0' + year).slice(-2);
+}
+
+function errorMessage_(error) {
+  const message = String(error && error.message || error);
+  if (/DriveApp|getFolderById|authorization|permission/i.test(message)) {
+    return 'Google Apps Script ยังไม่ได้รับสิทธิ์เข้าถึง Drive หรือไม่มีสิทธิ์ในโฟลเดอร์ กรุณารัน authorizeSetup() แล้ว Deploy เวอร์ชันใหม่: ' + message;
+  }
+  return message;
 }
 
 function json_(data) {

@@ -29,6 +29,39 @@ const writeLocalJson = (key, value) => {
   }
 };
 
+
+const compressImageToDataUrl = (file, maxSize = 1600, quality = 0.82) => new Promise((resolve, reject) => {
+  if (!file || !file.type?.startsWith('image/')) {
+    reject(new Error('กรุณาเลือกไฟล์รูปภาพเท่านั้น'));
+    return;
+  }
+
+  const reader = new FileReader();
+  reader.onerror = () => reject(new Error('ไม่สามารถอ่านไฟล์รูปภาพได้'));
+  reader.onload = () => {
+    const img = new Image();
+    img.onerror = () => reject(new Error('รูปภาพชนิดนี้ไม่รองรับ กรุณาใช้ JPG, PNG หรือ WEBP'));
+    img.onload = () => {
+      const scale = Math.min(1, maxSize / Math.max(img.width, img.height));
+      const width = Math.max(1, Math.round(img.width * scale));
+      const height = Math.max(1, Math.round(img.height * scale));
+      const canvas = document.createElement('canvas');
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(img, 0, 0, width, height);
+      resolve(canvas.toDataURL('image/jpeg', quality));
+    };
+    img.src = reader.result;
+  };
+  reader.readAsDataURL(file);
+});
+
+const formatThaiDateFolder = (date = new Date()) => {
+  const buddhistYear = (date.getFullYear() + 543) % 100;
+  return `${date.getDate()}-${date.getMonth() + 1}-${String(buddhistYear).padStart(2, '0')}`;
+};
+
 const VEGETABLE_TYPES = [
   { id: 'green-oak', name: 'กรีนโอ๊ค (Green Oak)', cycleDays: 45, ecRange: [1.2, 1.6], pHRange: [5.5, 6.5] },
   { id: 'red-oak', name: 'เรดโอ๊ค (Red Oak)', cycleDays: 45, ecRange: [1.2, 1.6], pHRange: [5.5, 6.5] },
@@ -342,6 +375,7 @@ export default function App() {
   const [logWeather, setLogWeather] = useState('sunny');
   const [logNotes, setLogNotes] = useState('');
   const [tempDailyPhotos, setTempDailyPhotos] = useState([]);
+  const [uploadingPhoto, setUploadingPhoto] = useState(false);
 
   // การสลับเลื่อนขั้นตอนพืช
   const [activeTransitionLot, setActiveTransitionLot] = useState(null);
@@ -579,37 +613,97 @@ export default function App() {
     );
   };
 
-  const handleUploadLocationPhoto = (lotId, source, e) => {
-    const file = e.target.files[0];
-    if (file) {
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        const updatedLots = lots.map(l => {
-          if (l.id === lotId) {
-            return {
-              ...l,
-              locationPhotos: [reader.result, ...(l.locationPhotos || [])]
-            };
-          }
-          return l;
-        });
-        setLots(updatedLots);
-        triggerAlert('success', `📸 บันทึกรูปผังที่ตั้งทางกายภาพของล็อตสำเร็จ (${source === 'camera' ? 'กล้องถ่ายภาพ' : 'คลังรูปถ่าย'})`);
-        handlePushToCloud(updatedLots, dailyLogs);
-      };
-      reader.readAsDataURL(file);
+  const uploadPhotoToDrive = async ({ file, photoType, lotFolderName = '', dateFolderName = '' }) => {
+    if (!appsScriptUrl) throw new Error('ยังไม่ได้เชื่อมต่อ Google Apps Script');
+
+    const dataUrl = await compressImageToDataUrl(file);
+    const response = await fetch(appsScriptUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify({
+        action: 'uploadPhoto',
+        photoType,
+        lotFolderName,
+        dateFolderName,
+        originalName: file.name || 'photo.jpg',
+        dataUrl
+      })
+    });
+
+    if (!response.ok) throw new Error(`HTTP status ${response.status}`);
+    const result = await response.json();
+    if (result.status !== 'success' || !result.url) {
+      throw new Error(result.message || 'อัปโหลดรูปไป Google Drive ไม่สำเร็จ');
+    }
+    return result.url;
+  };
+
+  const handleUploadLocationPhoto = async (lotId, source, e) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file || uploadingPhoto) return;
+
+    const targetLot = lots.find(l => l.id === lotId);
+    if (!targetLot) {
+      triggerAlert('danger', 'ไม่พบข้อมูลล็อตสำหรับจัดเก็บรูป');
+      return;
+    }
+
+    setUploadingPhoto(true);
+    setConnectionStatus('connecting');
+    try {
+      const url = await uploadPhotoToDrive({
+        file,
+        photoType: 'lot',
+        lotFolderName: `lot${targetLot.sequence || targetLot.id}`
+      });
+
+      const updatedLots = lots.map(l => l.id === lotId
+        ? { ...l, locationPhotos: [url, ...(l.locationPhotos || [])] }
+        : l
+      );
+      setLots(updatedLots);
+      await handlePushToCloud(updatedLots, dailyLogs);
+      setConnectionStatus('connected');
+      triggerAlert('success', `📸 อัปโหลดรูปเข้ Google Drive และบันทึกใน ${`lot${targetLot.sequence || targetLot.id}`} แล้ว (${source === 'camera' ? 'กล้องถ่ายภาพ' : 'คลังรูปถ่าย'})`);
+    } catch (error) {
+      console.error('Location photo upload error:', error);
+      setConnectionStatus('error');
+      const message = String(error.message || error);
+      triggerAlert('danger', message.includes('DriveApp') || message.includes('authorization')
+        ? '❌ Apps Script ยังไม่ได้รับสิทธิ์ Google Drive กรุณารัน authorizeSetup() และ Deploy เวอร์ชันใหม่'
+        : `❌ อัปโหลดรูปไม่สำเร็จ: ${message}`);
+    } finally {
+      setUploadingPhoto(false);
     }
   };
 
-  const handleUploadDailyPhoto = (source, e) => {
-    const file = e.target.files[0];
-    if (file) {
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        setTempDailyPhotos(prev => [reader.result, ...prev]);
-        triggerAlert('success', `📸 เก็บภาพวิเคราะห์สุขภาพพืชไว้ชั่วคราวแล้ว (${source === 'camera' ? 'กล้องถ่ายภาพ' : 'คลังรูปถ่าย'})`);
-      };
-      reader.readAsDataURL(file);
+  const handleUploadDailyPhoto = async (source, e) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file || uploadingPhoto) return;
+
+    setUploadingPhoto(true);
+    setConnectionStatus('connecting');
+    try {
+      const dateFolderName = formatThaiDateFolder(new Date());
+      const url = await uploadPhotoToDrive({
+        file,
+        photoType: 'daily',
+        dateFolderName
+      });
+      setTempDailyPhotos(prev => [url, ...prev]);
+      setConnectionStatus('connected');
+      triggerAlert('success', `📸 อัปโหลดรูปเข้ Google Drive โฟลเดอร์ ${dateFolderName} แล้ว (${source === 'camera' ? 'กล้องถ่ายภาพ' : 'คลังรูปถ่าย'})`);
+    } catch (error) {
+      console.error('Daily photo upload error:', error);
+      setConnectionStatus('error');
+      const message = String(error.message || error);
+      triggerAlert('danger', message.includes('DriveApp') || message.includes('authorization')
+        ? '❌ Apps Script ยังไม่ได้รับสิทธิ์ Google Drive กรุณารัน authorizeSetup() และ Deploy เวอร์ชันใหม่'
+        : `❌ อัปโหลดรูปไม่สำเร็จ: ${message}`);
+    } finally {
+      setUploadingPhoto(false);
     }
   };
 
@@ -845,58 +939,45 @@ ${logText}
   return (
     <div className="min-h-screen bg-slate-100 text-slate-800 font-sans antialiased text-base sm:text-lg md:text-xl">
       
-      {/* HEADER SECTION (WITH CLOUD CONNECTIVITY BAR) */}
+      {/* COMPACT HEADER */}
       <header className="bg-emerald-800 text-white shadow-md sticky top-0 z-10 border-b border-emerald-950">
-        <div className="max-w-7xl mx-auto px-4 py-4 flex flex-col md:flex-row justify-between items-center space-y-4 md:space-y-0">
-          
-          <div className="flex items-center space-x-3">
-            <div className="bg-white text-emerald-800 p-2.5 rounded-xl shadow-inner font-extrabold text-3xl sm:text-4xl flex items-center justify-center w-12 h-12 sm:w-14 sm:h-14">
-              🌱
-            </div>
-            <div>
-              <h1 className="text-xl sm:text-2xl md:text-3xl font-extrabold tracking-tight flex items-center gap-2">
-                ระบบควบคุมและติดตามการปลูกผักอัจฉริยะ
-              </h1>
-              {/* STATUS BAR BAR & AUTORECONNECT DISPLAY */}
-              <div className="flex flex-wrap items-center gap-2 mt-1">
-                <span className="text-xs sm:text-sm text-emerald-200 font-semibold">
-                  ควบคุมสารอาหารประจำอ่าง 4 ราง
+        <div className="max-w-7xl mx-auto px-3 sm:px-4 py-2.5 flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2.5 min-w-0">
+            <div className="bg-white text-emerald-800 rounded-xl shadow-inner text-2xl flex items-center justify-center w-10 h-10 shrink-0">🌱</div>
+            <div className="min-w-0">
+              <h1 className="text-base sm:text-xl md:text-2xl font-extrabold leading-tight truncate">ระบบควบคุมและติดตามการปลูกผักอัจฉริยะ</h1>
+              <div className="flex items-center gap-2 mt-0.5">
+                <span className={`text-[10px] sm:text-xs px-2 py-0.5 rounded-full font-bold border whitespace-nowrap ${
+                  connectionStatus === 'connected' ? 'bg-emerald-950 border-emerald-500 text-emerald-300' :
+                  connectionStatus === 'connecting' ? 'bg-sky-950 border-sky-500 text-sky-300' :
+                  connectionStatus === 'error' ? 'bg-rose-950 border-rose-500 text-rose-300' :
+                  'bg-amber-950 border-amber-500 text-amber-300'
+                }`}>
+                  {connectionStatus === 'connected' ? '● เชื่อมต่อแล้ว' : connectionStatus === 'connecting' ? '● กำลังเชื่อมต่อ' : connectionStatus === 'error' ? '● เชื่อมต่อผิดพลาด' : '● ออฟไลน์'}
                 </span>
-                <span className="text-xs px-2 py-0.5 rounded-full font-bold bg-emerald-950 flex items-center gap-1.5 border border-emerald-850">
-                  {connectionStatus === 'connected' && <><span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span> <span className="text-emerald-400">🟢 เชื่อมต่อ Google Sheet แล้ว</span></>}
-                  {connectionStatus === 'connecting' && <><span className="w-2 h-2 rounded-full bg-sky-400 animate-spin"></span> <span className="text-sky-400">🔵 กำลังเชื่อมต่อ...</span></>}
-                  {connectionStatus === 'offline' && <><span className="w-2 h-2 rounded-full bg-amber-400"></span> <span className="text-amber-400">🟡 โหมดบันทึกในเครื่อง (ออฟไลน์)</span></>}
-                  {connectionStatus === 'error' && <><span className="w-2 h-2 rounded-full bg-rose-500 animate-bounce"></span> <span className="text-rose-400">🔴 การเชื่อมต่อผิดพลาด</span></>}
-                </span>
+                <span className="hidden sm:inline text-xs text-emerald-200 font-semibold">4 ราง</span>
               </div>
             </div>
           </div>
 
-          <div className="flex flex-wrap items-center justify-center gap-2">
+          <div className="flex items-center gap-1.5 shrink-0">
             <button
               onClick={() => { setInputUrl(appsScriptUrl); setShowConfigModal(true); }}
-              className="bg-emerald-950 hover:bg-emerald-850 px-4 py-2 rounded-xl text-xs sm:text-sm font-bold border border-emerald-700 transition flex items-center gap-1.5"
-            >
-              ⚙️ ตั้งค่าเชื่อมต่อ
-            </button>
-            
+              className="bg-emerald-950 hover:bg-emerald-900 px-2.5 py-2 rounded-lg text-xs font-bold border border-emerald-700"
+              title="ตั้งค่าเชื่อมต่อ"
+            >⚙️</button>
             {appsScriptUrl && (
               <button
                 onClick={handleFetchFromCloud}
-                className="bg-emerald-850 hover:bg-emerald-750 px-3.5 py-2 rounded-xl text-xs sm:text-sm font-bold border border-emerald-700 transition flex items-center gap-1"
-                title="เรียกซิงค์รีเฟรชข้อมูลจาก Sheet"
-              >
-                🔄 รีเฟรชคลาวด์
-              </button>
+                className="bg-emerald-900 hover:bg-emerald-700 px-2.5 py-2 rounded-lg text-xs font-bold border border-emerald-700"
+                title="รีเฟรชคลาวด์"
+              >🔄</button>
             )}
-
-            <div className="bg-emerald-950/80 px-4 py-2 rounded-xl border border-emerald-750 font-mono text-sm sm:text-base flex items-center space-x-2">
-              <span className="w-2 h-2 rounded-full bg-red-400 animate-ping"></span>
-              <span>📅 {currentTime.toLocaleDateString('th-TH')}</span>
-              <span className="text-yellow-300 font-bold">⏰ {currentTime.toLocaleTimeString('th-TH')}</span>
+            <div className="bg-emerald-950/80 px-2.5 py-1.5 rounded-lg border border-emerald-600 font-mono text-[11px] sm:text-xs leading-tight text-center">
+              <div>{currentTime.toLocaleDateString('th-TH')}</div>
+              <div className="text-yellow-300 font-bold">{currentTime.toLocaleTimeString('th-TH')}</div>
             </div>
           </div>
-
         </div>
       </header>
 
@@ -1189,7 +1270,7 @@ ${logText}
                   
                   <div className="grid grid-cols-2 gap-2">
                     <label className="bg-sky-700 hover:bg-sky-800 text-white font-extrabold text-xs sm:text-sm py-2.5 rounded-xl text-center cursor-pointer transition shadow-sm block">
-                      📷 เปิดกล้องถ่ายภาพใบพืช
+                      {uploadingPhoto ? '⏳ กำลังอัปโหลด...' : '📷 เปิดกล้องถ่ายภาพใบพืช'}
                       <input
                         type="file"
                         accept="image/*"
@@ -1200,7 +1281,7 @@ ${logText}
                     </label>
 
                     <label className="bg-sky-100 hover:bg-sky-200 text-sky-800 border border-sky-300 font-extrabold text-xs sm:text-sm py-2.5 rounded-xl text-center cursor-pointer transition shadow-sm block">
-                      📂 เรียกรูปจากคลังภาพ
+                      {uploadingPhoto ? '⏳ กำลังอัปโหลด...' : '📂 เรียกรูปจากคลังภาพ'}
                       <input
                         type="file"
                         accept="image/*"
@@ -1396,7 +1477,7 @@ ${logText}
 
                         <div className="grid grid-cols-2 gap-2 mt-2">
                           <label className="bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-[11px] py-1.5 rounded-lg text-center cursor-pointer transition">
-                            📷 กล้องมือถือ
+                            {uploadingPhoto ? '⏳ อัปโหลด...' : '📷 กล้องมือถือ'}
                             <input
                               type="file"
                               accept="image/*"
@@ -1406,7 +1487,7 @@ ${logText}
                             />
                           </label>
                           <label className="bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-[11px] py-1.5 rounded-lg text-center cursor-pointer transition border border-slate-250">
-                            📂 คลังภาพ
+                            {uploadingPhoto ? '⏳ อัปโหลด...' : '📂 คลังภาพ'}
                             <input
                               type="file"
                               accept="image/*"
