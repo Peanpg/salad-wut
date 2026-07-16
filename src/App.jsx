@@ -7,6 +7,10 @@ const STORAGE_KEYS = {
   scriptUrl: 'smart_hydro_script_url',
 };
 
+const DEFAULT_APPS_SCRIPT_URL =
+  import.meta.env.VITE_APPS_SCRIPT_URL ||
+  'https://script.google.com/macros/s/AKfycbzp3KcmWVlMNqZl-LvLWBv0kkptQmvROl9LDwCZ0pTWba1OIY9qwohE2hPZYO3L-OH_ig/exec';
+
 const readLocalJson = (key, fallback) => {
   try {
     const raw = window.localStorage.getItem(key);
