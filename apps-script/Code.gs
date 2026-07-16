@@ -1,136 +1,126 @@
 /**
- * =========================================================================
- * 🌿ระบบบันทึกข้อมูลและอัปโหลดรูปภาพอัตโนมัติ (Smart Hydroponics Tracker Backend)
- * =========================================================================
+ * Smart Hydroponics Tracker Backend
+ * Deploy as Web app: Execute as Me, Who has access: Anyone
  */
-const SHEET_ID = "1PLn_mokbdzBa7zN91im94LZlzUTqAr7SEiBtNOlQM9g";
-const DRIVE_FOLDER_ID = "1Gen2eZE9R7wYvHlhmb6k_ikYm5NyYAow";
-const SHEET_NAME = "Logs";
+const SPREADSHEET_ID = '1PLn_mokbdzBa7zN91im94LZlzUTqAr7SEiBtNOlQM9g';
+const DRIVE_FOLDER_ID = '1Gen2eZE9R7wYvHlhmb6k_ikYm5NyYAow';
+const LOTS_SHEET = 'Lots';
+const LOGS_SHEET = 'DailyLogs';
 
-function doGet(e) {
+function doGet() {
   try {
-    const ss = SpreadsheetApp.openById(SHEET_ID);
-    const sheet = ss.getSheetByName(SHEET_NAME) || ss.getSheets()[0];
-    const data = sheet.getDataRange().getValues();
-    
-    return ContentService.createTextOutput(JSON.stringify({
-      status: "success",
-      data: data
-    })).setMimeType(ContentService.MimeType.JSON);
-    
-  } catch (err) {
-    return ContentService.createTextOutput(JSON.stringify({
-      status: "error",
-      message: err.toString()
-    })).setMimeType(ContentService.MimeType.JSON);
+    ensureStructure_();
+    return json_({
+      status: 'success',
+      lots: readCollection_(LOTS_SHEET),
+      logs: readCollection_(LOGS_SHEET),
+      serverTime: new Date().toISOString()
+    });
+  } catch (error) {
+    return json_({ status: 'error', message: String(error && error.message || error) });
   }
 }
 
 function doPost(e) {
+  const lock = LockService.getScriptLock();
   try {
-    const payload = JSON.parse(e.postData.contents);
-    const ss = SpreadsheetApp.openById(SHEET_ID);
-    let sheet = ss.getSheetByName(SHEET_NAME) || ss.insertSheet(SHEET_NAME);
+    lock.waitLock(30000);
+    ensureStructure_();
+    const body = e && e.postData && e.postData.contents ? e.postData.contents : '{}';
+    const payload = JSON.parse(body);
 
-    if (sheet.getLastRow() === 0) {
-      sheet.appendRow([
-        "วันเวลาบันทึก (Timestamp)", 
-        "รหัสรางปลูก (Rail ID)", 
-        "ค่า pH", 
-        "ค่า EC (mS/cm)", 
-        "อุณหภูมิน้ำ (°C)", 
-        "ระดับน้ำ (%)", 
-        "สภาพอากาศ", 
-        "รายละเอียดบันทึกเพิ่มเติม", 
-        "พิกัด GPS",
-        "เติมปุ๋ย AB (มล.)",
-        "เติม pH DOWN (มล.)",
-        "เติม pH UP (มล.)",
-        "เติมน้ำสะอาดเพิ่ม (ลิตร)",
-        "ค่า pH หลังปรับ",
-        "ค่า EC หลังปรับ (mS/cm)",
-        "ลิงก์รูปถ่ายประเมินโรคพืช"
-      ]);
+    if (payload.action !== 'syncAll') {
+      throw new Error('Unsupported action: ' + (payload.action || 'missing'));
     }
 
-    if (payload.action === "saveLog" || !payload.action) {
-      let uploadedImageUrls = [];
-      if (payload.dailyPhotos && Array.isArray(payload.dailyPhotos)) {
-        payload.dailyPhotos.forEach((base64Str, index) => {
-          if (base64Str && base64Str.startsWith("data:image")) {
-            const fileName = `img_${payload.railId}_${Date.now()}_${index + 1}`;
-            const fileUrl = uploadBase64ToDrive(base64Str, DRIVE_FOLDER_ID, fileName);
-            if (fileUrl) {
-              uploadedImageUrls.push(fileUrl);
-            }
-          }
-        });
-      }
+    const lots = normalizeAndUploadPhotos_(Array.isArray(payload.lots) ? payload.lots : [], 'lot');
+    const logs = normalizeAndUploadPhotos_(Array.isArray(payload.logs) ? payload.logs : [], 'log');
 
-      const imageUrlsString = uploadedImageUrls.join(", ");
+    writeCollection_(LOTS_SHEET, lots);
+    writeCollection_(LOGS_SHEET, logs);
 
-      sheet.appendRow([
-        new Date(),
-        payload.railId || "ไม่ระบุราง",
-        payload.pH !== undefined ? payload.pH : "",
-        payload.ec !== undefined ? payload.ec : "",
-        payload.waterTemp !== undefined ? payload.waterTemp : "",
-        payload.waterLevel !== undefined ? payload.waterLevel : "",
-        payload.weather || "",
-        payload.notes || "",
-        payload.gps || "",
-        payload.addedAB || 0,
-        payload.addedPhDown || 0,
-        payload.addedPhUp || 0,
-        payload.addedWaterVolume || 0,
-        payload.afterPh !== undefined ? payload.afterPh : "",
-        payload.afterEc !== undefined ? payload.afterEc : "",
-        imageUrlsString
-      ]);
-
-      return ContentService.createTextOutput(JSON.stringify({
-        status: "success",
-        message: "บันทึกข้อมูลพารามิเตอร์น้ำสำเร็จเรียบร้อยแล้ว",
-        uploadedImagesCount: uploadedImageUrls.length
-      })).setMimeType(ContentService.MimeType.JSON);
-    }
-
-    return ContentService.createTextOutput(JSON.stringify({
-      status: "error",
-      message: "ไม่พบคำสั่ง action ที่ระบบรองรับ"
-    })).setMimeType(ContentService.MimeType.JSON);
-
-  } catch (err) {
-    return ContentService.createTextOutput(JSON.stringify({
-      status: "error",
-      message: err.toString()
-    })).setMimeType(ContentService.MimeType.JSON);
+    return json_({ status: 'success', lots: lots, logs: logs, savedAt: new Date().toISOString() });
+  } catch (error) {
+    return json_({ status: 'error', message: String(error && error.message || error) });
+  } finally {
+    try { lock.releaseLock(); } catch (_) {}
   }
 }
 
-function uploadBase64ToDrive(base64Data, folderId, fileName) {
-  try {
-    const splitData = base64Data.split(',');
-    if (splitData.length < 2) return null;
-    
-    const metaHeader = splitData[0];
-    const rawBase64 = splitData[1];
-    
-    const mimeType = metaHeader.match(/:(.*?);/)[1];
-    let fileExtension = "jpg";
-    if (mimeType.includes("png")) fileExtension = "png";
-    if (mimeType.includes("gif")) fileExtension = "gif";
-    
-    const decodedBytes = Utilities.base64Decode(rawBase64);
-    const blob = Utilities.newBlob(decodedBytes, mimeType, `${fileName}.${fileExtension}`);
-    
-    const folder = DriveApp.getFolderById(folderId);
-    const file = folder.createFile(blob);
-    file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
-    
-    return file.getUrl();
-  } catch (err) {
-    Logger.log("เกิดข้อผิดพลาดในการบันทึกรูป: " + err.toString());
-    return null;
+function ensureStructure_() {
+  const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+  [LOTS_SHEET, LOGS_SHEET].forEach(function(name) {
+    let sheet = ss.getSheetByName(name);
+    if (!sheet) sheet = ss.insertSheet(name);
+    if (sheet.getLastRow() === 0) {
+      sheet.getRange(1, 1, 1, 3).setValues([['id', 'updated_at', 'data_json']]);
+      sheet.setFrozenRows(1);
+    }
+  });
+}
+
+function readCollection_(sheetName) {
+  const sheet = SpreadsheetApp.openById(SPREADSHEET_ID).getSheetByName(sheetName);
+  const lastRow = sheet.getLastRow();
+  if (lastRow < 2) return [];
+  return sheet.getRange(2, 1, lastRow - 1, 3).getValues().map(function(row) {
+    try { return JSON.parse(row[2]); } catch (_) { return null; }
+  }).filter(Boolean);
+}
+
+function writeCollection_(sheetName, items) {
+  const sheet = SpreadsheetApp.openById(SPREADSHEET_ID).getSheetByName(sheetName);
+  if (sheet.getLastRow() > 1) {
+    sheet.getRange(2, 1, sheet.getLastRow() - 1, 3).clearContent();
   }
+  if (!items.length) return;
+  const now = new Date();
+  const rows = items.map(function(item, index) {
+    return [String(item.id || (sheetName + '-' + (index + 1))), now, JSON.stringify(item)];
+  });
+  sheet.getRange(2, 1, rows.length, 3).setValues(rows);
+}
+
+function normalizeAndUploadPhotos_(items, prefix) {
+  return items.map(function(item) {
+    const cloned = JSON.parse(JSON.stringify(item));
+    if (Array.isArray(cloned.locationPhotos)) {
+      cloned.locationPhotos = cloned.locationPhotos.map(function(value, i) {
+        return saveDataUrlIfNeeded_(value, prefix + '-location-' + i);
+      });
+    }
+    if (Array.isArray(cloned.dailyPhotos)) {
+      cloned.dailyPhotos = cloned.dailyPhotos.map(function(value, i) {
+        return saveDataUrlIfNeeded_(value, prefix + '-daily-' + i);
+      });
+    }
+    return cloned;
+  });
+}
+
+function saveDataUrlIfNeeded_(value, namePrefix) {
+  if (typeof value !== 'string' || value.indexOf('data:image/') !== 0) return value;
+  const match = value.match(/^data:(image\/[a-zA-Z0-9.+-]+);base64,(.+)$/);
+  if (!match) return value;
+
+  const mimeType = match[1];
+  const extension = mimeType.split('/')[1].replace('jpeg', 'jpg');
+  const bytes = Utilities.base64Decode(match[2]);
+  const blob = Utilities.newBlob(bytes, mimeType, namePrefix + '-' + Date.now() + '.' + extension);
+  const folder = DriveApp.getFolderById(DRIVE_FOLDER_ID);
+  const file = folder.createFile(blob);
+
+  try {
+    file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+  } catch (_) {
+    // Workspace บางองค์กรปิดการแชร์สาธารณะไว้ ไฟล์ยังคงถูกบันทึกในโฟลเดอร์ที่กำหนด
+  }
+
+  return 'https://drive.google.com/thumbnail?id=' + file.getId() + '&sz=w1200';
+}
+
+function json_(data) {
+  return ContentService
+    .createTextOutput(JSON.stringify(data))
+    .setMimeType(ContentService.MimeType.JSON);
 }

@@ -1,5 +1,30 @@
 import React, { useState, useEffect } from 'react';
 
+const STORAGE_KEYS = {
+  lots: 'smart_hydro_lots',
+  logs: 'smart_hydro_logs',
+  guideHistory: 'smart_hydro_guide_history',
+  scriptUrl: 'smart_hydro_script_url',
+};
+
+const readLocalJson = (key, fallback) => {
+  try {
+    const raw = window.localStorage.getItem(key);
+    return raw ? JSON.parse(raw) : fallback;
+  } catch (error) {
+    console.warn(`อ่านข้อมูล LocalStorage ไม่สำเร็จ: ${key}`, error);
+    return fallback;
+  }
+};
+
+const writeLocalJson = (key, value) => {
+  try {
+    window.localStorage.setItem(key, JSON.stringify(value));
+  } catch (error) {
+    console.warn(`บันทึกข้อมูล LocalStorage ไม่สำเร็จ: ${key}`, error);
+  }
+};
+
 const VEGETABLE_TYPES = [
   { id: 'green-oak', name: 'กรีนโอ๊ค (Green Oak)', cycleDays: 45, ecRange: [1.2, 1.6], pHRange: [5.5, 6.5] },
   { id: 'red-oak', name: 'เรดโอ๊ค (Red Oak)', cycleDays: 45, ecRange: [1.2, 1.6], pHRange: [5.5, 6.5] },
@@ -15,131 +40,59 @@ const RAILS = [
   { id: 'nft-8m', name: 'ราง NFT 8 เมตร', capacity: 120 }
 ];
 
-const INITIAL_LOTS = [
-  {
-    id: 'lot-4',
-    sequence: 4,
-    name: 'ล็อตที่ #4 (กรีนโอ๊ค - 14/07/2026)',
-    vegetables: [{ id: 'green-oak', qty: 250 }],
-    sowedDate: '2026-07-14',
-    sowedQty: 250,
-    currentQty: 250,
-    stage: 'tissue',
-    railId: '',
-    locationPhotos: [],
-    cupColor: ''
-  },
-  {
-    id: 'lot-3',
-    sequence: 3,
-    name: 'ล็อตที่ #3 (คอส + เรดโอ๊ค - 10/07/2026)',
-    vegetables: [
-      { id: 'cos', qty: 200 },
-      { id: 'red-oak', qty: 100 }
-    ],
-    sowedDate: '2026-07-10',
-    sowedQty: 300,
-    currentQty: 282,
-    stage: 'sponge',
-    railId: '',
-    locationPhotos: [],
-    cupColor: ''
-  },
-  {
-    id: 'lot-2',
-    sequence: 2,
-    name: 'ล็อตที่ #2 (เรดโอ๊ค - 28/06/2026)',
-    vegetables: [{ id: 'red-oak', qty: 150 }],
-    sowedDate: '2026-06-28',
-    sowedQty: 150,
-    currentQty: 135,
-    stage: 'nursery',
-    railId: 'nursery-1',
-    cupColor: 'สีส้ม',
-    locationPhotos: ['https://images.unsplash.com/photo-1599599810769-bcde5a160d32?auto=format&fit=crop&q=80&w=400'],
-    notes: 'ย้ายลงรางอนุบาล 1 เรียบร้อย สภาพต้นแข็งแรงดี'
-  },
-  {
-    id: 'lot-1',
-    sequence: 1,
-    name: 'ล็อตที่ #1 (บัตเตอร์เฮด - 15/06/2026)',
-    vegetables: [{ id: 'butterhead', qty: 200 }],
-    sowedDate: '2026-06-15',
-    sowedQty: 200,
-    currentQty: 180,
-    stage: 'nft',
-    railId: 'nft-double',
-    cupColor: 'สีขาว',
-    locationPhotos: ['https://images.unsplash.com/photo-1508500387859-6e48b4ad5d86?auto=format&fit=crop&q=80&w=400'],
-    notes: 'ย้ายจากอนุบาลมาลงราง NFT คู่ สังเกตพัฒนาการใบกว้างสม่ำเสมอ'
-  }
-];
-
-const INITIAL_DAILY_LOGS = [
-  {
-    id: 'log-1',
-    railId: 'nursery-1',
-    date: '2026-07-13',
-    time: '08:30',
-    pH: 6.2,
-    ec: 1.4,
-    waterTemp: 26.5,
-    waterLevel: 95,
-    weather: 'sunny',
-    notes: 'น้ำในรางอนุบาล 1 ใสสะอาดดี ค่าปุ๋ยนิ่งตามเกณฑ์',
-    gps: '16.4322, 102.8236',
-    dailyPhotos: ['https://images.unsplash.com/photo-1506084868230-bb9d95c24759?auto=format&fit=crop&q=80&w=400'],
-    addedAB: 50,
-    addedPhDown: 10,
-    addedPhUp: 0,
-    addedWaterVolume: 5,
-    afterPh: 6.0,
-    afterEc: 1.5
-  }
-];
-
 export default function App() {
   const [activeTab, setActiveTab] = useState('daily-record');
-  const [lots, setLots] = useState(() => {
-    const saved = localStorage.getItem('hydro_lots');
-    return saved ? JSON.parse(saved) : INITIAL_LOTS;
-  });
-  const [dailyLogs, setDailyLogs] = useState(() => {
-    const saved = localStorage.getItem('hydro_daily_logs');
-    return saved ? JSON.parse(saved) : INITIAL_DAILY_LOGS;
-  });
+  
+  const [lots, setLots] = useState(() => readLocalJson(STORAGE_KEYS.lots, []));
+  const [dailyLogs, setDailyLogs] = useState(() => readLocalJson(STORAGE_KEYS.logs, []));
+  
   const [currentTime, setCurrentTime] = useState(new Date());
   const [alertMsg, setAlertMsg] = useState({ type: '', text: '' });
   const [searchRailId, setSearchRailId] = useState('');
   const [searchLotInHistory, setSearchLotInHistory] = useState('');
 
+  // คลังค้นหาข้อมูลโรคพืชและสถิติ
   const [guideSearchQuery, setGuideSearchQuery] = useState('');
-  const [viewedGuideHistory, setViewedGuideHistory] = useState(() => {
-    const saved = localStorage.getItem('hydro_guide_history');
-    return saved ? JSON.parse(saved) : [
-      { date: '14/07/2026', title: 'การควบคุมค่า pH สำหรับผักกรีนโอ๊ค' },
-      { date: '12/07/2026', title: 'วิธีจำแนกเชื้อรา Pythium จากรากสลัดสีคล้ำ' }
-    ];
+  const [viewedGuideHistory, setViewedGuideHistory] = useState(() => readLocalJson(STORAGE_KEYS.guideHistory, []));
+
+  const [appsScriptUrl, setAppsScriptUrl] = useState(() => {
+    return window.localStorage.getItem(STORAGE_KEYS.scriptUrl) || '';
   });
+  const [connectionStatus, setConnectionStatus] = useState('offline'); // 'offline' | 'connecting' | 'connected' | 'error'
+  const [showConfigModal, setShowConfigModal] = useState(false);
+  const [inputUrl, setInputUrl] = useState(appsScriptUrl);
 
   useEffect(() => {
-    localStorage.setItem('hydro_lots', JSON.stringify(lots));
+    writeLocalJson(STORAGE_KEYS.lots, lots);
   }, [lots]);
 
   useEffect(() => {
-    localStorage.setItem('hydro_daily_logs', JSON.stringify(dailyLogs));
+    writeLocalJson(STORAGE_KEYS.logs, dailyLogs);
   }, [dailyLogs]);
 
   useEffect(() => {
-    localStorage.setItem('hydro_guide_history', JSON.stringify(viewedGuideHistory));
+    writeLocalJson(STORAGE_KEYS.guideHistory, viewedGuideHistory);
   }, [viewedGuideHistory]);
 
+  useEffect(() => {
+    setInputUrl(appsScriptUrl);
+  }, [appsScriptUrl]);
+
+  // ตั้งเวลานาฬิกาแบบเรียลไทม์
   useEffect(() => {
     const clockTimer = setInterval(() => {
       setCurrentTime(new Date());
     }, 1000);
     return () => clearInterval(clockTimer);
   }, []);
+
+  useEffect(() => {
+    if (appsScriptUrl) {
+      handleFetchFromCloud();
+    } else {
+      setConnectionStatus('offline');
+    }
+  }, [appsScriptUrl]);
 
   const triggerAlert = (type, text) => {
     setAlertMsg({ type, text });
@@ -171,6 +124,121 @@ export default function App() {
     });
   };
 
+  const handleFetchFromCloud = async () => {
+    if (!appsScriptUrl) {
+      triggerAlert('warning', 'ยังไม่ได้ทำการระบุ URL เชื่อมโยง Google Apps Script');
+      setConnectionStatus('offline');
+      return;
+    }
+
+    setConnectionStatus('connecting');
+    try {
+      const response = await fetch(appsScriptUrl, {
+        method: 'GET',
+        headers: { 'Accept': 'application/json' }
+      });
+      
+      if (!response.ok) throw new Error(`HTTP status ${response.status}`);
+      
+      const result = await response.json();
+      if (result.status === 'success') {
+        const cloudLots = Array.isArray(result.lots) ? result.lots : [];
+        const cloudLogs = Array.isArray(result.logs) ? result.logs : [];
+        const cloudIsEmpty = cloudLots.length === 0 && cloudLogs.length === 0;
+        const localHasData = lots.length > 0 || dailyLogs.length > 0;
+
+        if (cloudIsEmpty && localHasData) {
+          setConnectionStatus('connected');
+          await handlePushToCloud(lots, dailyLogs);
+          triggerAlert('success', '☁️ เชื่อมต่อสำเร็จ และอัปโหลดข้อมูลในเครื่องขึ้น Google Sheets แล้ว');
+          return;
+        }
+
+        setLots(cloudLots);
+        setDailyLogs(cloudLogs);
+        setConnectionStatus('connected');
+        triggerAlert('success', '🔄 ดึงข้อมูลล่าสุดจาก Google Sheets และซิงค์อุปกรณ์สำเร็จ!');
+      } else {
+        throw new Error(result.message || 'Unknown server error');
+      }
+    } catch (err) {
+      console.error('Fetch Error:', err);
+      setConnectionStatus('error');
+      triggerAlert('danger', `❌ ไม่สามารถซิงค์อัตโนมัติได้: ${err.message}`);
+    }
+  };
+
+  const handlePushToCloud = async (currentLots = lots, currentLogs = dailyLogs) => {
+    if (!appsScriptUrl) {
+      triggerAlert('warning', 'อัปเดตบนเบราว์เซอร์แล้ว (หากต้องการส่งขึ้น Google Sheet กรุณาตั้งค่าเชื่อมต่อที่ส่วนหัว)');
+      return;
+    }
+
+    setConnectionStatus('connecting');
+    try {
+      const payload = {
+        action: 'syncAll',
+        lots: currentLots,
+        logs: currentLogs
+      };
+
+      const response = await fetch(appsScriptUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: JSON.stringify(payload)
+      });
+
+      if (!response.ok) throw new Error(`HTTP status ${response.status}`);
+
+      const result = await response.json();
+      if (result.status === 'success') {
+        setConnectionStatus('connected');
+        triggerAlert('success', '☁️ บันทึกความเปลี่ยนแปลงและอัปเดตตาราง Google Sheets สำเร็จ!');
+      } else {
+        throw new Error(result.message || 'Server write error');
+      }
+    } catch (err) {
+      console.error('Push Error:', err);
+      setConnectionStatus('error');
+      triggerAlert('danger', `❌ เกิดข้อผิดพลาดในการเซฟข้อมูลบนระบบคลาวด์: ${err.message}`);
+    }
+  };
+
+  const handleSaveConfig = (e) => {
+    e.preventDefault();
+    const cleanUrl = inputUrl.trim();
+
+    if (!cleanUrl) {
+      triggerAlert('warning', 'กรุณากรอก Google Apps Script Web App URL');
+      return;
+    }
+
+    const isValidAppsScriptUrl = /^https:\/\/script\.google\.com\/macros\/s\/.+\/exec(?:\?.*)?$/.test(cleanUrl);
+    if (!isValidAppsScriptUrl) {
+      triggerAlert('warning', 'URL ต้องเป็น Web App ของ Google Apps Script และลงท้ายด้วย /exec');
+      return;
+    }
+
+    try {
+      window.localStorage.setItem(STORAGE_KEYS.scriptUrl, cleanUrl);
+      setAppsScriptUrl(cleanUrl);
+      setInputUrl(cleanUrl);
+      setShowConfigModal(false);
+      triggerAlert('success', '💾 บันทึก URL เชื่อมต่อแล้ว ระบบจะจำไว้ในเบราว์เซอร์นี้');
+    } catch (error) {
+      console.error('Save URL Error:', error);
+      triggerAlert('danger', 'เบราว์เซอร์ไม่สามารถบันทึก URL ได้');
+    }
+  };
+
+  const handleClearConfig = () => {
+    window.localStorage.removeItem(STORAGE_KEYS.scriptUrl);
+    setInputUrl('');
+    setAppsScriptUrl('');
+    setConnectionStatus('offline');
+    triggerAlert('warning', 'ล้าง URL เชื่อมต่อเดิมแล้ว');
+  };
+
   const [currentGps, setCurrentGps] = useState('');
   const [fetchingGps, setFetchingGps] = useState(false);
 
@@ -195,6 +263,7 @@ export default function App() {
     );
   };
 
+  // ฟอร์มสำหรับการเติมปุ๋ยและวัดน้ำรายวัน
   const [showChemicalAdditions, setShowChemicalAdditions] = useState(false);
   const [addedAB, setAddedAB] = useState('0');
   const [addedPhDown, setAddedPhDown] = useState('0');
@@ -203,11 +272,13 @@ export default function App() {
   const [afterPh, setAfterPh] = useState('');
   const [afterEc, setAfterEc] = useState('');
 
+  // ฟอร์มสำหรับจัดสร้างล็อตใหม่
   const [showAddModal, setShowAddModal] = useState(false);
   const [newLotSowedDate, setNewLotSowedDate] = useState(new Date().toISOString().split('T')[0]);
   const [mainVegId, setMainVegId] = useState('green-oak');
   const [mainVegQty, setMainVegQty] = useState(200);
 
+  // ระบบปลูกผักหลายชนิดในถาดเดียวกัน
   const [showMultiVeg, setShowMultiVeg] = useState(false);
   const [additionalVegs, setAdditionalVegs] = useState([]);
 
@@ -236,6 +307,7 @@ export default function App() {
   const [editLotStage, setEditLotStage] = useState('tissue');
   const [editLotCupColor, setEditLotCupColor] = useState('สีขาว');
 
+  // ค่าควบคุมเบื้องต้นฟอร์มค่าน้ำรายวัน
   const [selectedRailForLog, setSelectedRailForLog] = useState(RAILS[0]?.id || '');
   const [logPH, setLogPH] = useState('6.0');
   const [logEC, setLogEC] = useState('1.4');
@@ -245,6 +317,7 @@ export default function App() {
   const [logNotes, setLogNotes] = useState('');
   const [tempDailyPhotos, setTempDailyPhotos] = useState([]);
 
+  // การสลับเลื่อนขั้นตอนพืช
   const [activeTransitionLot, setActiveTransitionLot] = useState(null);
   const [transitionStage, setTransitionStage] = useState('');
   const [transitionForm, setTransitionForm] = useState({
@@ -256,7 +329,8 @@ export default function App() {
     averageWeight: '150'
   });
 
-  const [selectedLotForAI, setSelectedLotForAI] = useState(lots[0]?.id || '');
+  // Prompt ส่งออกวิเคราะห์สำหรับ AI
+  const [selectedLotForAI, setSelectedLotForAI] = useState('');
   const [copiedPrompt, setCopiedPrompt] = useState(false);
   const [aiReportText, setAiReportText] = useState('');
 
@@ -291,11 +365,14 @@ export default function App() {
         cupColor: ''
       };
 
-      setLots([newLot, ...lots]);
+      const updatedLots = [newLot, ...lots];
+      setLots(updatedLots);
       setShowAddModal(false);
       setAdditionalVegs([]);
       setShowMultiVeg(false);
-      triggerAlert('success', `🌱 เพิ่มล็อตที่ #${nextSequence} ลงทะเบียนในระยะเริ่มเพาะสำเร็จแล้ว`);
+      triggerAlert('success', `🌱 เพิ่มล็อตที่ #${nextSequence} ลงระบบเรียบร้อยพร้อมซิงค์ข้อมูลแล้ว`);
+      
+      handlePushToCloud(updatedLots, dailyLogs);
     };
 
     requestConfirm(
@@ -322,7 +399,7 @@ export default function App() {
     if (!editingLot) return;
 
     const executeSave = () => {
-      setLots(prev => prev.map(l => {
+      const updatedLots = lots.map(l => {
         if (l.id === editingLot.id) {
           return {
             ...l,
@@ -334,9 +411,12 @@ export default function App() {
           };
         }
         return l;
-      }));
+      });
+
+      setLots(updatedLots);
       setEditingLot(null);
-      triggerAlert('success', '✏️ ได้จัดเก็บการบันทึกแก้ไขข้อมูลแปลงเรียบร้อยแล้ว');
+      triggerAlert('success', '✏️ ได้บันทึกรายละเอียดแก้ไขข้อมูลเรียบร้อยแล้ว');
+      handlePushToCloud(updatedLots, dailyLogs);
     };
 
     requestConfirm(
@@ -353,14 +433,16 @@ export default function App() {
     if (!targetLot) return;
 
     const executeDelete = () => {
-      setLots(prev => prev.filter(l => l.id !== lotId));
+      const updatedLots = lots.filter(l => l.id !== lotId);
+      setLots(updatedLots);
       if (editingLot && editingLot.id === lotId) setEditingLot(null);
-      triggerAlert('warning', '🗑️ ได้ทำการลบข้อมูลล็อตที่ระบุออกจากคลังฐานข้อมูลอย่างถาวรแล้ว');
+      triggerAlert('warning', '🗑️ ได้ลบรายละเอียดล็อตพืชดังกล่าวออกจากคลังฐานข้อมูลแล้ว');
+      handlePushToCloud(updatedLots, dailyLogs);
     };
 
     requestConfirm(
       '⚠️ ยืนยันการลบล็อตทิ้งถาวร',
-      `คุณกำลังจะลบล็อต "${targetLot.name}" ออกจากระบบ ข้อมูลพารามิเตอร์ทั้งหมดในล็อตจะสูญหายอย่างถาวร ต้องการลบใช่หรือไม่?`,
+      `คุณกำลังจะลบล็อต "${targetLot.name}" ออกจากระบบ ประวัติและพารามิเตอร์ทั้งหมดจะสูญหายอย่างถาวร ต้องการทำรายการต่อใช่หรือไม่?`,
       executeDelete,
       'danger',
       'ลบถาวรทันที'
@@ -372,7 +454,7 @@ export default function App() {
     if (!targetLot) return;
 
     const executeCull = () => {
-      setLots(prev => prev.map(l => {
+      const updatedLots = lots.map(l => {
         if (l.id === lotId) {
           return {
             ...l,
@@ -382,9 +464,11 @@ export default function App() {
           };
         }
         return l;
-      }));
+      });
+      setLots(updatedLots);
       if (editingLot && editingLot.id === lotId) setEditingLot(null);
-      triggerAlert('danger', '🍂 ล็อตปลูกนี้ถูกคัดแยกทิ้งทั้งหมด และจัดเตรียมเข้ารายงานวิเคราะห์ความเสียหายแล้ว');
+      triggerAlert('danger', '🍂 ล็อตปลูกนี้ถูกคัดแยกทิ้งทั้งหมด และได้รับการจัดประเภทเป็นเคสศึกษาโรคเรียบร้อย');
+      handlePushToCloud(updatedLots, dailyLogs);
     };
 
     requestConfirm(
@@ -427,7 +511,8 @@ export default function App() {
         afterEc: (showChemicalAdditions && afterEc) ? Number(afterEc) : null
       };
 
-      setDailyLogs([newLog, ...dailyLogs]);
+      const updatedLogs = [newLog, ...dailyLogs];
+      setDailyLogs(updatedLogs);
       setLogNotes('');
       setTempDailyPhotos([]);
       setAddedAB('0');
@@ -439,6 +524,7 @@ export default function App() {
       setShowChemicalAdditions(false);
 
       triggerAlert('success', `💾 ได้บันทึกข้อมูลประจำวันของ ${targetRailName} เรียบร้อยแล้ว`);
+      handlePushToCloud(lots, updatedLogs);
     };
 
     requestConfirm(
@@ -452,8 +538,10 @@ export default function App() {
 
   const handleDeleteDailyLog = (logId) => {
     const executeDeleteLog = () => {
-      setDailyLogs(prev => prev.filter(item => item.id !== logId));
+      const updatedLogs = dailyLogs.filter(item => item.id !== logId);
+      setDailyLogs(updatedLogs);
       triggerAlert('warning', '🗑️ ลบประวัติค่าน้ำที่ระบุเรียบร้อย');
+      handlePushToCloud(lots, updatedLogs);
     };
 
     requestConfirm(
@@ -470,7 +558,7 @@ export default function App() {
     if (file) {
       const reader = new FileReader();
       reader.onloadend = () => {
-        setLots(prev => prev.map(l => {
+        const updatedLots = lots.map(l => {
           if (l.id === lotId) {
             return {
               ...l,
@@ -478,8 +566,10 @@ export default function App() {
             };
           }
           return l;
-        }));
+        });
+        setLots(updatedLots);
         triggerAlert('success', `📸 บันทึกรูปผังที่ตั้งทางกายภาพของล็อตสำเร็จ (${source === 'camera' ? 'กล้องถ่ายภาพ' : 'คลังรูปถ่าย'})`);
+        handlePushToCloud(updatedLots, dailyLogs);
       };
       reader.readAsDataURL(file);
     }
@@ -515,7 +605,7 @@ export default function App() {
     if (!activeTransitionLot) return;
 
     const executeTransition = () => {
-      setLots(prev => prev.map(lot => {
+      const updatedLots = lots.map(lot => {
         if (lot.id === activeTransitionLot.id) {
           const updated = {
             ...lot,
@@ -532,16 +622,18 @@ export default function App() {
           if (transitionStage === 'harvested') {
             updated.harvestQty = Number(transitionForm.qty);
             updated.averageWeight = Number(transitionForm.averageWeight);
-            updated.currentQty = 0;
+            updated.currentQty = 0; // ย้ายพ้นรางปลูก
           }
 
           return updated;
         }
         return lot;
-      }));
+      });
 
+      setLots(updatedLots);
       triggerAlert('success', `🚀 ย้ายสลับขั้นตอนผักของล็อตไปยังระยะ "${transitionStage}" เรียบร้อยแล้ว`);
       setActiveTransitionLot(null);
+      handlePushToCloud(updatedLots, dailyLogs);
     };
 
     requestConfirm(
@@ -612,14 +704,17 @@ ${vegsSummary}
 ${logText}
 
 [คำขอวิเคราะห์สำหรับ AI]
-ผมได้แนบภาพประวัติพิกัดตำแหน่งล็อต และรูปถ่ายปัญหาบริเวณพุ่มใบ/ระบบรากมาพร้อมกับชุดคำสั่งนี้ ช่วยประเมินอาการขอบใบไหม้ (Tip burn), ตรวจสัญญาณรากเน่าจากเชื้อรา (Pythium), และวิเคราะห์ความเหมาะสมของช่วงอุณหภูมิน้ำตามพิกัด GPS เพื่อปรับปรุงสูตรสารอาหารให้ดีขึ้นด้วยครับ`;
+ช่วยประเมินอาการขอบใบไหม้ (Tip burn), ตรวจสัญญาณรากเน่าจากเชื้อรา (Pythium), และวิเคราะห์ความเหมาะสมของอุณหภูมิน้ำเพื่อให้คำแนะนำในการปรับสูตรการให้สารอาหารให้เหมาะสมที่สุด`;
 
       setAiReportText(prompt);
       setCopiedPrompt(false);
+    } else {
+      setAiReportText('');
     }
   }, [selectedLotForAI, dailyLogs, lots]);
 
   const copyToClipboard = () => {
+    if (!aiReportText) return;
     const textArea = document.createElement("textarea");
     textArea.value = aiReportText;
     document.body.appendChild(textArea);
@@ -627,7 +722,7 @@ ${logText}
     try {
       document.execCommand('copy');
       setCopiedPrompt(true);
-      triggerAlert('success', '📋 คัดลอกข้อความรายงานสำเร็จ! แนบพร้อมไฟล์รูปเพื่อวิเคราะห์ในแชทภายนอกได้เลยครับ');
+      triggerAlert('success', '📋 คัดลอกพารามิเตอร์พร้อมใช้เสร็จแล้ว! นำข้อมูลนี้ไปคุยวิเคราะห์กับ AI ต่อได้เลยครับ');
     } catch (err) {
       triggerAlert('danger', 'เกิดข้อผิดพลาดในการคัดลอกข้อความโดยตรง');
     }
@@ -724,7 +819,7 @@ ${logText}
   return (
     <div className="min-h-screen bg-slate-100 text-slate-800 font-sans antialiased text-base sm:text-lg md:text-xl">
       
-      {/* HEADER SECTION */}
+      {/* HEADER SECTION (WITH CLOUD CONNECTIVITY BAR) */}
       <header className="bg-emerald-800 text-white shadow-md sticky top-0 z-10 border-b border-emerald-950">
         <div className="max-w-7xl mx-auto px-4 py-4 flex flex-col md:flex-row justify-between items-center space-y-4 md:space-y-0">
           
@@ -733,16 +828,46 @@ ${logText}
               🌱
             </div>
             <div>
-              <h1 className="text-xl sm:text-2xl md:text-3xl font-extrabold tracking-tight">ระบบควบคุมและติดตามการปลูกผักอัจฉริยะ</h1>
-              <p className="text-xs sm:text-sm text-emerald-200 font-semibold mt-0.5">บันทึกควบคุมสารอาหารประจำอ่างและแปลงปลูกย่อย 4 ราง</p>
+              <h1 className="text-xl sm:text-2xl md:text-3xl font-extrabold tracking-tight flex items-center gap-2">
+                ระบบควบคุมและติดตามการปลูกผักอัจฉริยะ
+              </h1>
+              {/* STATUS BAR BAR & AUTORECONNECT DISPLAY */}
+              <div className="flex flex-wrap items-center gap-2 mt-1">
+                <span className="text-xs sm:text-sm text-emerald-200 font-semibold">
+                  ควบคุมสารอาหารประจำอ่าง 4 ราง
+                </span>
+                <span className="text-xs px-2 py-0.5 rounded-full font-bold bg-emerald-950 flex items-center gap-1.5 border border-emerald-850">
+                  {connectionStatus === 'connected' && <><span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span> <span className="text-emerald-400">🟢 เชื่อมต่อ Google Sheet แล้ว</span></>}
+                  {connectionStatus === 'connecting' && <><span className="w-2 h-2 rounded-full bg-sky-400 animate-spin"></span> <span className="text-sky-400">🔵 กำลังเชื่อมต่อ...</span></>}
+                  {connectionStatus === 'offline' && <><span className="w-2 h-2 rounded-full bg-amber-400"></span> <span className="text-amber-400">🟡 โหมดบันทึกในเครื่อง (ออฟไลน์)</span></>}
+                  {connectionStatus === 'error' && <><span className="w-2 h-2 rounded-full bg-rose-500 animate-bounce"></span> <span className="text-rose-400">🔴 การเชื่อมต่อผิดพลาด</span></>}
+                </span>
+              </div>
             </div>
           </div>
 
-          <div className="flex flex-wrap items-center justify-center gap-3">
-            <div className="bg-emerald-900/90 px-4 py-2 rounded-xl border border-emerald-700 font-mono text-sm sm:text-base flex items-center space-x-2">
-              <span className="w-2.5 h-2.5 rounded-full bg-red-400 animate-pulse"></span>
+          <div className="flex flex-wrap items-center justify-center gap-2">
+            <button
+              onClick={() => { setInputUrl(appsScriptUrl); setShowConfigModal(true); }}
+              className="bg-emerald-950 hover:bg-emerald-850 px-4 py-2 rounded-xl text-xs sm:text-sm font-bold border border-emerald-700 transition flex items-center gap-1.5"
+            >
+              ⚙️ ตั้งค่าเชื่อมต่อ
+            </button>
+            
+            {appsScriptUrl && (
+              <button
+                onClick={handleFetchFromCloud}
+                className="bg-emerald-850 hover:bg-emerald-750 px-3.5 py-2 rounded-xl text-xs sm:text-sm font-bold border border-emerald-700 transition flex items-center gap-1"
+                title="เรียกซิงค์รีเฟรชข้อมูลจาก Sheet"
+              >
+                🔄 รีเฟรชคลาวด์
+              </button>
+            )}
+
+            <div className="bg-emerald-950/80 px-4 py-2 rounded-xl border border-emerald-750 font-mono text-sm sm:text-base flex items-center space-x-2">
+              <span className="w-2 h-2 rounded-full bg-red-400 animate-ping"></span>
               <span>📅 {currentTime.toLocaleDateString('th-TH')}</span>
-              <span className="text-yellow-300 font-bold">⏰ {currentTime.toLocaleTimeString('th-TH')} น.</span>
+              <span className="text-yellow-300 font-bold">⏰ {currentTime.toLocaleTimeString('th-TH')}</span>
             </div>
           </div>
 
@@ -814,12 +939,11 @@ ${logText}
         </div>
 
         {/* =======================================================
-            TAB 1: DAILY RECORD (หน้าบันทึกประจำวันรายรางปลูก)
+            TAB 1: DAILY RECORD
             ======================================================= */}
         {activeTab === 'daily-record' && (
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 animate-in fade-in duration-200">
             
-            {/* Input Form Block */}
             <div className="bg-white p-5 sm:p-7 rounded-3xl border border-slate-200 shadow-sm lg:col-span-12 space-y-6">
               <div>
                 <h2 className="text-lg sm:text-xl md:text-2xl font-bold text-slate-800">📝 ตรวจวัดค่าน้ำ & บันทึกเคมีรายรางปลูก</h2>
@@ -830,7 +954,6 @@ ${logText}
 
               <form onSubmit={handleSaveDailyLog} className="space-y-4">
                 
-                {/* Select Rail */}
                 <div className="space-y-2">
                   <label className="font-extrabold text-slate-700 block text-sm sm:text-base">เลือกระบบรางปลูกที่กำลังตรวจวัด</label>
                   <select
@@ -846,7 +969,6 @@ ${logText}
                   </select>
                 </div>
 
-                {/* GPS Coordinator */}
                 <div className="p-4 bg-slate-50 rounded-2xl border border-slate-200 space-y-3">
                   <span className="font-extrabold text-slate-700 block text-xs sm:text-sm">📍 บันทึกพิกัดจริงเพื่อประมวลผลสภาพแสงในแปลง</span>
                   <div className="flex flex-col sm:flex-row gap-2">
@@ -876,7 +998,6 @@ ${logText}
                   )}
                 </div>
 
-                {/* Parameter Values Grid */}
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-1.5">
                     <label className="font-extrabold text-slate-700 block text-xs sm:text-sm">ค่า pH (กรด-ด่างน้ำ)</label>
@@ -905,7 +1026,6 @@ ${logText}
                   </div>
                 </div>
 
-                {/* Water Temp and Water Level */}
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-1.5">
                     <label className="font-extrabold text-slate-700 block text-xs sm:text-sm">อุณหภูมิน้ำเลี้ยง (°C)</label>
@@ -930,12 +1050,11 @@ ${logText}
                       className="w-full rounded-xl border-2 border-slate-200 p-3 font-mono font-bold text-base sm:text-lg focus:outline-none focus:border-emerald-500"
                     />
                     <span className="text-xs text-slate-500 block font-semibold">
-                      ปริมาตรคงเหลือ: ประมาณ ${((RAILS.find(r => r.id === selectedRailForLog)?.capacity || 140) * Number(logWaterLevel) / 100).toFixed(1)} ลิตร
+                      ปริมาตรคงเหลือ: ประมาณ {((RAILS.find(r => r.id === selectedRailForLog)?.capacity || 140) * Number(logWaterLevel) / 100).toFixed(1)} ลิตร
                     </span>
                   </div>
                 </div>
 
-                {/* CHEMICAL ADDITIONS DROP-DOWN SECTION */}
                 <div className="p-1 bg-amber-50/70 border border-amber-200 rounded-2xl">
                   <button
                     type="button"
@@ -1021,7 +1140,6 @@ ${logText}
                   )}
                 </div>
 
-                {/* Weather Select */}
                 <div className="space-y-1.5">
                   <label className="font-extrabold text-slate-700 block text-xs sm:text-sm">สภาพอากาศช่วงที่วัดน้ำ</label>
                   <div className="grid grid-cols-4 gap-2">
@@ -1040,9 +1158,8 @@ ${logText}
                   </div>
                 </div>
 
-                {/* DAILY DISEASE PHOTOS */}
                 <div className="p-4 bg-sky-50 rounded-2xl border border-sky-200 space-y-2">
-                  <span className="font-extrabold text-sky-950 block text-xs sm:text-sm">🦠 รูปถ่ายใบพืชประจำวัน (เพื่อสังเกตสัญญาณใบเหลืองไหม้ หรือโรคพืช)</span>
+                  <span className="font-extrabold text-sky-955 block text-xs sm:text-sm">🦠 รูปถ่ายใบพืชประจำวัน (เพื่อสังเกตสัญญาณใบเหลืองไหม้ หรือโรคพืช)</span>
                   
                   <div className="grid grid-cols-2 gap-2">
                     <label className="bg-sky-700 hover:bg-sky-800 text-white font-extrabold text-xs sm:text-sm py-2.5 rounded-xl text-center cursor-pointer transition shadow-sm block">
@@ -1069,7 +1186,7 @@ ${logText}
 
                   {tempDailyPhotos.length > 0 && (
                     <div className="mt-3 space-y-1.5">
-                      <p className="text-xs font-bold text-sky-900">รูปตรวจวิเคราะห์โรคที่เตรียมแนบ (${tempDailyPhotos.length} รูป):</p>
+                      <p className="text-xs font-bold text-sky-900">รูปตรวจวิเคราะห์โรคที่เตรียมแนบ ({tempDailyPhotos.length} รูป):</p>
                       <div className="flex gap-2 overflow-x-auto py-1">
                         {tempDailyPhotos.map((img, i) => (
                           <div key={i} className="relative flex-shrink-0">
@@ -1088,7 +1205,6 @@ ${logText}
                   )}
                 </div>
 
-                {/* Notes Input */}
                 <div className="space-y-1.5">
                   <label className="font-extrabold text-slate-700 block text-xs sm:text-sm">รายละเอียดความผิดปกติที่พบบนแปลง</label>
                   <textarea
@@ -1110,7 +1226,6 @@ ${logText}
               </form>
             </div>
 
-            {/* Quick Tips Box */}
             <div className="bg-amber-50 p-5 sm:p-7 rounded-3xl border border-amber-200 lg:col-span-12 space-y-4">
               <h3 className="text-lg font-bold text-amber-955 flex items-center gap-1.5">💡 แนวทางปฏิบัติประจำวัน</h3>
               <p className="text-sm text-amber-900 leading-relaxed">
@@ -1130,7 +1245,7 @@ ${logText}
         )}
 
         {/* =======================================================
-            TAB 2: LOTS (จัดการล็อตปลูก)
+            TAB 2: LOTS
             ======================================================= */}
         {activeTab === 'lots' && (
           <div className="space-y-6 animate-in fade-in duration-200">
@@ -1149,6 +1264,23 @@ ${logText}
                 <span>🌱 + เพาะเมล็ดล็อตใหม่</span>
               </button>
             </div>
+
+            {/* EMPTY STATE COMPONENT (เมื่อเริ่มต้นและไม่มีข้อมูลใดๆ ในคลังแผ่นงาน) */}
+            {activeLots.length === 0 && (
+              <div className="bg-white p-12 rounded-3xl border-2 border-dashed border-slate-200 text-center space-y-4">
+                <div className="text-6xl">🥗</div>
+                <h3 className="text-xl font-bold text-slate-750">ยังไม่มีล็อตพืชที่กําลังดำเนินการปลูกในฟาร์ม</h3>
+                <p className="text-slate-400 text-sm max-w-md mx-auto">
+                  แผ่นงานของคุณว่างเปล่าอย่างสมบูรณ์แบบ กดปุ่มสีเขียว "เพาะเมล็ดล็อตใหม่" ด้านบนเพื่อเริ่มลงบันทึกข้อมูลผักรุ่นแรกของคุณในคลังฐานข้อมูล
+                </p>
+                <button
+                  onClick={() => setShowAddModal(true)}
+                  className="inline-flex bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs sm:text-sm px-6 py-3 rounded-xl transition shadow"
+                >
+                  🌱 หยอดเมล็ดครั้งแรก
+                </button>
+              </div>
+            )}
 
             {/* List of Active Lots */}
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
@@ -1193,20 +1325,20 @@ ${logText}
                     <div className="p-5 space-y-4 flex-grow text-xs sm:text-sm text-slate-700">
                       
                       {/* Yield Numbers */}
-                      <div className="bg-slate-50 p-3 rounded-2xl border border-slate-150 grid grid-cols-2 gap-2 text-center">
+                      <div className="bg-slate-50 p-3 rounded-2xl border border-slate-155 grid grid-cols-2 gap-2 text-center">
                         <div>
                           <p className="text-[10px] text-slate-400 font-bold uppercase">เริ่มเพาะ</p>
                           <p className="text-sm sm:text-base font-extrabold text-slate-800">{lot.sowedQty} ต้น</p>
                         </div>
                         <div>
                           <p className="text-[10px] text-emerald-600 font-bold uppercase">เหลือรอดจริง</p>
-                          <p className="text-sm sm:text-base font-extrabold text-slate-800">{lot.currentQty} ต้น</p>
+                          <p className="text-sm sm:text-base font-extrabold text-emerald-700">{lot.currentQty} ต้น</p>
                         </div>
                       </div>
 
                       {/* Rail assignment details */}
                       <div className="space-y-1.5 bg-slate-50 p-3 rounded-xl border">
-                        <p className="font-bold text-[11px] text-slate-505">📍 ข้อมูลการติดตั้งบนรางปลูก:</p>
+                        <p className="font-bold text-[11px] text-slate-500">📍 ข้อมูลการติดตั้งบนรางปลูก:</p>
                         <p className="text-slate-800 font-extrabold text-xs sm:text-sm">
                           {currentRailObj ? `✓ ${currentRailObj.name}` : 'ยังไม่ได้ลงรางปลูก (อยู่ในช่วงเตรียมเพาะ)'}
                         </p>
@@ -1316,6 +1448,7 @@ ${logText}
                         )}
                       </div>
 
+                      {/* Cull Entire Lot button */}
                       <button
                         onClick={() => handleCullEntireLot(lot.id)}
                         className="w-full text-center bg-rose-100 hover:bg-rose-200 text-rose-900 border border-rose-300 font-extrabold py-2 rounded-xl text-xs sm:text-sm transition shadow-sm block mt-1"
@@ -1334,7 +1467,7 @@ ${logText}
         )}
 
         {/* =======================================================
-            TAB 3: AI REPORT (ส่งรายงานวิเคราะห์ AI)
+            TAB 3: AI REPORT
             ======================================================= */}
         {activeTab === 'ai-report' && (
           <div className="space-y-6 animate-in fade-in duration-200">
@@ -1344,7 +1477,7 @@ ${logText}
               <div className="bg-white p-5 sm:p-7 rounded-3xl border border-slate-200 shadow-sm lg:col-span-5 space-y-4">
                 <div>
                   <h3 className="text-base sm:text-lg font-bold text-slate-800">1. เลือกล็อตปลูกและพารามิเตอร์ส่งวิเคราะห์</h3>
-                  <p className="text-xs text-slate-500">
+                  <p className="text-xs text-slate-505">
                     ดึงประวัติล็อต และรูปถ่ายเพื่อแนบประกอบเข้าคุยในแชท AI
                   </p>
                 </div>
@@ -1366,6 +1499,7 @@ ${logText}
                 {selectedLotForAI && (
                   <div className="p-4 bg-slate-50 rounded-2xl border space-y-4 text-xs sm:text-sm">
                     
+                    {/* Copy All images link widget */}
                     <div>
                       <h4 className="font-bold text-slate-700 mb-2">📸 คัดลอกรูปภาพทั้งหมดของล็อตนี้:</h4>
                       <div className="flex flex-col gap-2">
@@ -1386,12 +1520,12 @@ ${logText}
                             const textWithImages = `[รูปภาพทั้งหมดของล็อตปลูก ${selectedLot?.name}]\n` +
                               allImages.map((img, index) => `รูปที่ ${index + 1}: ${img.substring(0, 150)}... [ภาพข้อมูลเข้ารหัส]`).join('\n');
 
-                            const textArea = document.createElement("textarea");
-                            textArea.value = textWithImages;
-                            document.body.appendChild(textArea);
-                            textArea.select();
+                            const tempTextArea = document.createElement("textarea");
+                            tempTextArea.value = textWithImages;
+                            document.body.appendChild(tempTextArea);
+                            tempTextArea.select();
                             document.execCommand('copy');
-                            document.body.removeChild(textArea);
+                            document.body.removeChild(tempTextArea);
                             
                             triggerAlert('success', `📋 คัดลอกรูปถ่ายทั้งหมดจำนวน ${allImages.length} รายการลงคลิปบอร์ดแล้ว คุณสามารถแนบวางส่งเข้าช่องแชท AI เพื่อประมวลผลทันที`);
                           }}
@@ -1404,7 +1538,7 @@ ${logText}
                     </div>
 
                     <div>
-                      <span className="font-bold text-slate-505 block mb-1">🗺️ รูปถ่ายพิกัดแปลง/ตำแหน่งของล็อต:</span>
+                      <span className="font-bold text-slate-500 block mb-1">🗺️ รูปถ่ายพิกัดแปลง/ตำแหน่งของล็อต:</span>
                       {lots.find(l => l.id === selectedLotForAI)?.locationPhotos?.length > 0 ? (
                         <div className="grid grid-cols-3 gap-2">
                           {lots.find(l => l.id === selectedLotForAI).locationPhotos.map((img, i) => (
@@ -1417,7 +1551,7 @@ ${logText}
                     </div>
 
                     <div>
-                      <span className="font-bold text-slate-505 block mb-1">🦠 รูปถ่ายใบพืชสำหรับตรวจโรครายวัน (จากรางที่เกี่ยวข้อง):</span>
+                      <span className="font-bold text-slate-500 block mb-1">🦠 รูปถ่ายใบพืชสำหรับตรวจโรครายวัน (จากรางที่เกี่ยวข้อง):</span>
                       {dailyLogs.filter(log => log.railId === lots.find(l => l.id === selectedLotForAI)?.railId && log.dailyPhotos?.length > 0).length > 0 ? (
                         <div className="grid grid-cols-3 gap-2">
                           {dailyLogs.filter(log => log.railId === lots.find(l => l.id === selectedLotForAI)?.railId).flatMap(log => log.dailyPhotos).map((img, i) => (
@@ -1453,8 +1587,8 @@ ${logText}
                 <textarea
                   readOnly
                   rows="12"
-                  value={aiReportText}
-                  className="w-full rounded-2xl border-2 border-slate-150 p-4 bg-slate-50 text-xs sm:text-sm font-mono leading-relaxed text-slate-650 focus:outline-none"
+                  value={aiReportText || "กรุณาเลือกรุ่นล็อตปลูกในหน้าต่างฝั่งซ้าย เพื่อดึงข้อมูลค่าน้ำย้อนหลังมาจัดชุดพร้อมรายงานส่งตรวจ AI..."}
+                  className="w-full rounded-2xl border-2 border-slate-150 p-4 bg-slate-50 text-xs sm:text-sm font-mono leading-relaxed text-slate-655 focus:outline-none"
                 ></textarea>
               </div>
 
@@ -1464,7 +1598,7 @@ ${logText}
         )}
 
         {/* =======================================================
-            TAB 4: DASHBOARD (ภาพรวมฟาร์ม / แผงสรุปผล)
+            TAB 4: DASHBOARD
             ======================================================= */}
         {activeTab === 'dashboard' && (
           <div className="space-y-6 animate-in fade-in duration-200">
@@ -1476,7 +1610,7 @@ ${logText}
                 <div>
                   <p className="text-xs font-bold text-slate-400 uppercase tracking-wider font-extrabold">ล็อตเพาะเลี้ยงที่ยังดำเนินงาน</p>
                   <p className="text-2xl sm:text-3xl font-extrabold text-slate-800 mt-1">{activeLots.length} ล็อต</p>
-                  <p className="text-xs text-slate-505 mt-1 font-semibold">จากประวัติเพาะสะสมทั้งหมด {lots.length} ล็อต</p>
+                  <p className="text-xs text-slate-500 mt-1 font-semibold">จากประวัติเพาะสะสมทั้งหมด {lots.length} ล็อต</p>
                 </div>
                 <div className="bg-emerald-50 text-emerald-700 p-4 rounded-2xl text-2xl font-bold">🥬</div>
               </div>
@@ -1485,7 +1619,7 @@ ${logText}
                 <div>
                   <p className="text-xs font-bold text-slate-400 uppercase tracking-wider font-extrabold">สรุปปริมาณสลัดมีชีวิตทั้งหมด</p>
                   <p className="text-2xl sm:text-3xl font-extrabold text-slate-800 mt-1">{totalActivePlants} ต้น</p>
-                  <p className="text-xs text-slate-505 mt-1 font-semibold">ปลูกและเพาะเลี้ยงตามสัดส่วนราง</p>
+                  <p className="text-xs text-slate-500 mt-1 font-semibold">ปลูกและเพาะเลี้ยงตามสัดส่วนราง</p>
                 </div>
                 <div className="bg-sky-50 text-sky-700 p-4 rounded-2xl text-2xl font-bold">💧</div>
               </div>
@@ -1499,8 +1633,10 @@ ${logText}
                 ) : (
                   <div className="flex flex-col sm:flex-row items-center gap-4 justify-around w-full">
                     
+                    {/* SVG Doughnut Circle */}
                     <div className="relative w-28 h-28 flex-shrink-0">
                       <svg viewBox="0 0 100 100" className="w-full h-full transform -rotate-90">
+                        {/* Background track circle */}
                         <circle cx="50" cy="50" r={svgRadius} fill="transparent" stroke="#F1F5F9" strokeWidth="8" />
                         
                         {doughnutSegments.map((seg, i) => {
@@ -1521,12 +1657,14 @@ ${logText}
                           );
                         })}
                       </svg>
+                      {/* Center total number */}
                       <div className="absolute inset-0 flex flex-col justify-center items-center text-center">
                         <span className="text-[10px] font-bold text-slate-400 uppercase leading-none">ทั้งหมด</span>
                         <span className="text-base font-extrabold text-slate-800 font-mono leading-tight">{totalActivePlants}</span>
                       </div>
                     </div>
 
+                    {/* Chart Legends */}
                     <div className="flex-grow space-y-1 text-xs sm:text-sm">
                       {stageData.map((stage) => (
                         <div key={stage.key} className="flex items-center justify-between gap-4">
@@ -1604,6 +1742,13 @@ ${logText}
                         </tr>
                       );
                     })}
+                    {lots.length === 0 && (
+                      <tr>
+                        <td colSpan="5" className="py-8 text-center text-slate-400 italic">
+                          📭 ไม่มีข้อมูลประวัติล็อตปลูกในขณะนี้ (สเปรดชีตเปล่า)
+                        </td>
+                      </tr>
+                    )}
                   </tbody>
                 </table>
               </div>
@@ -1614,21 +1759,23 @@ ${logText}
                 ======================================================= */}
             <div className="bg-white p-5 sm:p-7 rounded-3xl border border-slate-200 shadow-sm space-y-4">
               
-              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 border-b border-slate-100 pb-3">
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 border-b border-slate-150 pb-3">
                 <div>
                   <h2 className="text-base sm:text-lg font-bold text-slate-800">📊 ตารางประวัติการบันทึกควบคุมย้อนหลังประจำราง</h2>
-                  <p className="text-xs sm:text-sm text-slate-500">ตรวจสอบสารอาหารน้ำ ความเป็นกรดด่าง และลบออกกรณีพิมพ์ค่าบันทึกผิดพลาด</p>
+                  <p className="text-xs sm:text-sm text-slate-505">ตรวจสอบสารอาหารน้ำ ความเป็นกรดด่าง และลบออกกรณีพิมพ์ค่าบันทึกผิดพลาด</p>
                 </div>
               </div>
 
+              {/* SEARCH & FILTERS IN HISTORICAL LOGS */}
               <div className="p-4 bg-slate-50 rounded-2xl border border-slate-200 grid grid-cols-1 md:grid-cols-2 gap-4 text-xs sm:text-sm font-semibold">
                 
+                {/* Rail selection filter */}
                 <div className="space-y-1">
                   <span className="font-extrabold text-slate-700">🔍 ค้นหาคัดกรองเฉพาะรางปลูก:</span>
                   <select
                     value={searchRailId}
                     onChange={(e) => setSearchRailId(e.target.value)}
-                    className="w-full rounded-xl border border-slate-300 p-2.5 focus:outline-none bg-white font-bold text-slate-750"
+                    className="w-full rounded-xl border border-slate-300 p-2.5 focus:outline-none bg-white font-bold text-slate-755"
                   >
                     <option value="">-- แสดงบันทึก "ทุกรางปลูกทั้งหมด" --</option>
                     {RAILS.map(r => (
@@ -1637,6 +1784,7 @@ ${logText}
                   </select>
                 </div>
 
+                {/* Lot text search filter */}
                 <div className="space-y-1">
                   <span className="font-extrabold text-slate-700">🔍 ค้นหาคำสำคัญของล็อตปลูกที่เกี่ยวข้อง:</span>
                   <div className="relative">
@@ -1677,15 +1825,18 @@ ${logText}
                             <span className="font-extrabold text-slate-900 text-base">{rail ? rail.name : 'รางปลูกไม่ทราบรหัส'}</span>
                             <span className="bg-slate-100 text-slate-600 font-semibold px-2.5 py-1 rounded-lg text-xs ml-2">📅 {log.date} | ⏰ {log.time} น.</span>
                           </div>
+                          {/* DELETE BUTTON */}
                           <button
                             onClick={() => handleDeleteDailyLog(log.id)}
-                            className="bg-rose-50 hover:bg-rose-100 border border-rose-200 text-rose-750 font-bold text-xs px-2.5 py-1 rounded-lg transition-all"
+                            className="bg-rose-50 hover:bg-rose-100 border border-rose-200 text-rose-755 font-bold text-xs px-2.5 py-1 rounded-lg transition-all"
                           >
                             ลบประวัติ 🗑️
                           </button>
                         </div>
 
+                        {/* Parameter Panels */}
                         <div className="grid grid-cols-4 gap-2 text-center text-xs">
+                          
                           <div className="p-2 rounded-xl border bg-slate-50 border-slate-200 text-slate-700">
                             <p className="text-[10px] text-slate-400 font-bold font-extrabold">ค่า pH</p>
                             <p className="text-sm sm:text-base font-extrabold font-mono">{log.pH}</p>
@@ -1707,18 +1858,21 @@ ${logText}
                               {log.waterLevel}% (~{((rail?.capacity || 140) * Number(log.waterLevel) / 100).toFixed(0)} ลิตร)
                             </p>
                           </div>
+
                         </div>
 
+                        {/* Display Added Substances if recorded */}
                         {(log.addedAB > 0 || log.addedPhDown > 0 || log.addedPhUp > 0 || log.addedWaterVolume > 0) && (
                           <div className="bg-amber-50/50 p-2.5 rounded-xl border border-amber-100/70 text-xs text-slate-700 flex flex-wrap gap-x-4 gap-y-1 font-semibold">
-                            <span className="font-bold text-amber-950">🧪 รายละเอียดการเติมเคมี/น้ำ:</span>
-                            {log.addedAB > 0 && <span className="text-slate-655">ปุ๋ย AB: {log.addedAB} มล.</span>}
+                            <span className="font-bold text-amber-955">🧪 รายละเอียดการเติมเคมี/น้ำ:</span>
+                            {log.addedAB > 0 && <span className="text-slate-650">ปุ๋ย AB: {log.addedAB} มล.</span>}
                             {log.addedWaterVolume > 0 && <span className="text-slate-655">เติมน้ำเพิ่ม: {log.addedWaterVolume} ลิตร</span>}
                             {log.addedPhDown > 0 && <span className="text-rose-700">pH DOWN: {log.addedPhDown} มล.</span>}
                             {log.addedPhUp > 0 && <span className="text-emerald-700">pH UP: {log.addedPhUp} มล.</span>}
                             
+                            {/* Render after measurement inside history if present */}
                             {(log.afterPh || log.afterEc) && (
-                              <div className="w-full border-t border-amber-150 pt-1 mt-1 flex gap-4 text-indigo-900 font-bold">
+                              <div className="w-full border-t border-amber-155 pt-1 mt-1 flex gap-4 text-indigo-900 font-bold">
                                 {log.afterPh && <span>✦ pH หลังปรับ: {log.afterPh}</span>}
                                 {log.afterEc && <span>✦ EC หลังปรับ: {log.afterEc} mS/cm</span>}
                               </div>
@@ -1730,6 +1884,7 @@ ${logText}
                           <p className="text-xs text-slate-505 font-mono">📍 อุปกรณ์อ้างอิงพิกัด GPS: {log.gps}</p>
                         )}
 
+                        {/* Disease tracking photo gallery */}
                         {log.dailyPhotos && log.dailyPhotos.length > 0 && (
                           <div className="bg-sky-50/50 p-2.5 rounded-xl border border-sky-100">
                             <p className="text-xs font-bold text-sky-850 mb-1">📸 รูปใบพืชตรวจวิเคราะห์ในบันทึกนี้:</p>
@@ -1746,7 +1901,7 @@ ${logText}
                         )}
 
                         {log.notes && (
-                          <p className="text-xs sm:text-sm text-slate-650 bg-slate-100 p-2.5 rounded-xl italic leading-relaxed">
+                          <p className="text-xs sm:text-sm text-slate-600 bg-slate-100 p-2.5 rounded-xl italic leading-relaxed">
                             💬 <strong>รายงานสถานการณ์:</strong> {log.notes}
                           </p>
                         )}
@@ -1762,14 +1917,15 @@ ${logText}
         )}
 
         {/* =======================================================
-            TAB 5: GUIDE (คู่มือปลูกผักสลัด & คลังข้อมูลโรคพืชและแมลง)
+            TAB 5: GUIDE
             ======================================================= */}
         {activeTab === 'guide' && (
           <div className="space-y-6 animate-in fade-in duration-200">
             
+            {/* SEARCH BOX & GOOGLE SEARCH ACTION */}
             <div className="bg-white p-5 sm:p-7 rounded-3xl border border-slate-200 shadow-sm">
               <h2 className="text-lg sm:text-xl md:text-2xl font-bold text-slate-900 mb-1">💡 คู่มือการจัดการฟาร์มผัก & คลังข้อมูลโรคพืชและแมลง</h2>
-              <p className="text-xs sm:text-sm text-slate-500 leading-relaxed font-semibold">
+              <p className="text-xs sm:text-sm text-slate-505 leading-relaxed font-semibold">
                 คลังความรู้ออฟไลน์ครบวงจรสำหรับการจัดการสารอาหารพารามิเตอร์น้ำ และระบบดูแลป้องกันโรคพืชไฮโดรโปนิกส์
               </p>
 
@@ -1803,9 +1959,11 @@ ${logText}
 
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
               
+              {/* Stages 1-5 (Left Column) */}
               <div className="space-y-4">
                 <h3 className="text-sm sm:text-base font-bold text-emerald-900 bg-emerald-50 px-4 py-2 rounded-xl border border-emerald-150 inline-block">📘 ข้อมูลขั้นตอนปลูกมาตรฐานทั้ง 5 ระยะ</h3>
 
+                {/* Tissue */}
                 <div className="bg-white p-5 rounded-2xl border border-slate-200 space-y-1 hover:border-emerald-500 transition-all">
                   <h4 className="font-extrabold text-slate-800 text-sm sm:text-base">1. เพาะเมล็ดในทิชชู่ (Tissue Sowing - 1 ถึง 3 วัน)</h4>
                   <p className="text-xs sm:text-sm text-slate-500 leading-relaxed font-semibold">
@@ -1813,35 +1971,41 @@ ${logText}
                   </p>
                 </div>
 
+                {/* Sponge */}
                 <div className="bg-white p-5 rounded-2xl border border-slate-200 space-y-1 hover:border-emerald-500 transition-all">
                   <h4 className="font-extrabold text-slate-800 text-sm sm:text-base">2. ลงโฟมเพาะ (Sponge Sowing - 3 ถึง 12 วัน)</h4>
-                  <p className="text-xs sm:text-sm text-slate-500 leading-relaxed font-semibold">
+                  <p className="text-xs sm:text-sm text-slate-505 leading-relaxed font-semibold">
                     คีบเมล็ดที่รากฝอยเริ่มทำงานเสียบลงฟองน้ำแช่น้ำสะอาดในถาดพรม ยอดสลัดโผล่ใบเลี้ยงและเริ่มให้รับแดดอ่อนยามเช้าเพื่อให้พืชลำต้นแข็งแรงไม่ยืด
                   </p>
                 </div>
 
+                {/* Nursery */}
                 <div className="bg-white p-5 rounded-2xl border border-slate-200 space-y-1 hover:border-emerald-500 transition-all">
                   <h4 className="font-extrabold text-slate-800 text-sm sm:text-base">3. ลงรางอนุบาล 1 (Nursery Rail 1 - 12 ถึง 25 วัน)</h4>
-                  <p className="text-xs sm:text-sm text-slate-500 leading-relaxed font-semibold">
+                  <p className="text-xs sm:text-sm text-slate-505 leading-relaxed font-semibold">
                     ย้ายลงรางน้ำไหลหมุนเวียน ให้ระดับปุ๋ยอ่อน ๆ (EC 0.8 - 1.2 mS/cm) ยอดใบแผ่กว้างระบบรากเดินไวและเปลี่ยนสีเป็นขาวสว่างสมบูรณ์
                   </p>
                 </div>
 
+                {/* NFT */}
                 <div className="bg-white p-5 rounded-2xl border border-slate-200 space-y-1 hover:border-emerald-500 transition-all">
                   <h4 className="font-extrabold text-slate-800 text-sm sm:text-base">4. ลงราง NFT (NFT Rail - 25 ถึง 42 วัน)</h4>
-                  <p className="text-xs sm:text-sm text-slate-500 leading-relaxed font-semibold">
+                  <p className="text-xs sm:text-sm text-slate-505 leading-relaxed font-semibold">
                     ระยะย้ายสลัดลงรางท่อ NFT ขนาดความยาวหลัก 8 เมตรหรือรางคู่ เพิ่มค่า EC เพื่อเร่งโครงสร้างใบผักสลัด (1.4 - 1.8 mS/cm) หมั่นตรวจค่าน้ำและอุณหภูมิสารละลาย
                   </p>
                 </div>
 
+                {/* Harvest */}
                 <div className="bg-white p-5 rounded-2xl border border-slate-200 space-y-1 hover:border-emerald-500 transition-all">
                   <h4 className="font-extrabold text-slate-800 text-sm sm:text-base">5. เก็บเกี่ยว (Harvesting - 45 วันขึ้นไป)</h4>
-                  <p className="text-xs sm:text-sm text-slate-500 leading-relaxed font-semibold">
+                  <p className="text-xs sm:text-sm text-slate-505 leading-relaxed font-semibold">
                     เลี้ยงด้วยน้ำเปล่าบริสุทธิ์เพื่อเคลียร์สารตกค้างในยอดผัก 2 วันก่อนการตัดขาย บรรจุหีบห่อด้วยความเย็นที่เหมาะสมเพื่อคงความสดกรอบให้ผักสลัด
                   </p>
                 </div>
+
               </div>
 
+              {/* Diseases and treatment (Right Column) */}
               <div className="space-y-4">
                 <h3 className="text-sm sm:text-base font-bold text-rose-900 bg-rose-50 px-4 py-2 rounded-xl border border-rose-150 inline-block">⚠️ รายการโรคพืชและแนวทางแก้ไขที่สืบค้น</h3>
 
@@ -1849,7 +2013,7 @@ ${logText}
                   {filteredGuides.map((guide) => (
                     <div key={guide.id} className="bg-white p-5 rounded-2xl border border-slate-200 space-y-2 border-l-4 border-l-rose-500">
                       <h4 className="font-bold text-rose-700 text-sm sm:text-base">{guide.title}</h4>
-                      <p className="text-xs sm:text-sm text-slate-600 leading-relaxed font-semibold">{guide.desc}</p>
+                      <p className="text-xs sm:text-sm text-slate-605 leading-relaxed font-semibold">{guide.desc}</p>
                       <div className="bg-rose-50/50 p-2.5 rounded-xl border text-xs space-y-1">
                         <p className="font-bold text-rose-950">🔍 อาการที่พบ:</p>
                         <p className="text-slate-600 font-medium">{guide.symptom}</p>
@@ -1864,6 +2028,7 @@ ${logText}
                   )}
                 </div>
 
+                {/* History list of searched guides */}
                 <div className="p-4 bg-slate-50 rounded-2xl border space-y-2 text-xs sm:text-sm font-semibold">
                   <h4 className="font-bold text-slate-700">📑 ล่าสุดในประวัติสืบค้นคลังของคุณ (คลิกเพื่อค้นหาซ้ำ):</h4>
                   <div className="divide-y divide-slate-200">
@@ -1871,7 +2036,7 @@ ${logText}
                       <div
                         key={i}
                         onClick={() => handleHistorySearchClick(hist.title)}
-                        className="py-2 flex justify-between items-center text-xs text-slate-655 font-medium hover:text-emerald-700 hover:bg-white px-2 rounded-lg cursor-pointer transition-all"
+                        className="py-2 flex justify-between items-center text-xs text-slate-600 font-medium hover:text-emerald-700 hover:bg-white px-2 rounded-lg cursor-pointer transition-all"
                       >
                         <span className="truncate">📖 {hist.title}</span>
                         <div className="flex items-center space-x-2 shrink-0">
@@ -1901,7 +2066,7 @@ ${logText}
       <footer className="bg-slate-800 text-slate-300 py-10 border-t border-slate-900 mt-12 text-center text-xs sm:text-sm">
         <div className="max-w-7xl mx-auto px-4 space-y-2 font-medium">
           <p>🌿 ระบบควบคุมและติดตามการปลูกผักอัจฉริยะ (Smart Hydroponics Monitor) 2026</p>
-          <p className="text-slate-505">แอปพลิเคชันออกแบบพิเศษเพื่อระบบไฮโดรโปนิกส์ ควบคุมปริมาณน้ำ 120-140 ลิตร ในแต่ละแปลงย่อย</p>
+          <p className="text-slate-500">แอปพลิเคชันออกแบบพิเศษเพื่อระบบไฮโดรโปนิกส์ ควบคุมปริมาณน้ำ 120-140 ลิตร ในแต่ละแปลงย่อย</p>
         </div>
       </footer>
 
@@ -1930,6 +2095,7 @@ ${logText}
                 />
               </div>
 
+              {/* Primary Vegetable */}
               <div className="p-3 bg-slate-50 rounded-2xl border border-slate-200 space-y-3">
                 <p className="font-extrabold text-slate-800">🥬 ชนิดผักหลักที่ลงปลูก:</p>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
@@ -1954,6 +2120,7 @@ ${logText}
                 </div>
               </div>
 
+              {/* COLLAPSIBLE MULTI-VEG PANEL */}
               <div className="p-1 bg-emerald-50 border border-emerald-200 rounded-2xl">
                 <button
                   type="button"
@@ -2008,6 +2175,7 @@ ${logText}
                 )}
               </div>
 
+              {/* Total seeds counter preview */}
               <div className="text-right text-xs font-extrabold text-emerald-800">
                 🌱 ยอดเพาะเมล็ดรวมล็อตนี้: {Number(mainVegQty) + additionalVegs.reduce((sum, item) => sum + item.qty, 0)} ต้น
               </div>
@@ -2016,7 +2184,7 @@ ${logText}
                 <button
                   type="button"
                   onClick={() => setShowAddModal(false)}
-                  className="px-4 py-2 bg-slate-100 hover:bg-slate-200 rounded-xl text-slate-650"
+                  className="px-4 py-2 bg-slate-100 hover:bg-slate-200 rounded-xl text-slate-655"
                 >
                   ยกเลิก
                 </button>
@@ -2045,12 +2213,13 @@ ${logText}
               <button onClick={() => setEditingLot(null)} className="text-slate-400 hover:text-slate-700 text-2xl font-bold px-1.5">×</button>
             </div>
 
+            {/* TAB SELECTOR INSIDE EDIT MODAL */}
             <div className="flex bg-slate-100 p-1.5 rounded-xl border text-xs sm:text-sm font-bold">
               <button
                 type="button"
                 onClick={() => setEditTab('current')}
                 className={`flex-1 py-2 text-center rounded-lg transition ${
-                  editTab === 'current' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-850'
+                  editTab === 'current' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-855'
                 }`}
               >
                 1. แก้ไขข้อมูลปัจจุบัน
@@ -2059,7 +2228,7 @@ ${logText}
                 type="button"
                 onClick={() => setEditTab('stage')}
                 className={`flex-1 py-2 text-center rounded-lg transition ${
-                  editTab === 'stage' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-850'
+                  editTab === 'stage' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-855'
                 }`}
               >
                 2. ย้อนสถานะการปลูก
@@ -2069,6 +2238,7 @@ ${logText}
             <form onSubmit={handleSaveEdit} className="space-y-4">
               
               {editTab === 'current' ? (
+                /* TAB 1: General Info Edit */
                 <div className="space-y-4">
                   <div className="space-y-1.5">
                     <label className="font-bold text-slate-700 block">แก้ไขชื่อรุ่นล็อต</label>
@@ -2108,6 +2278,7 @@ ${logText}
                   </div>
                 </div>
               ) : (
+                /* TAB 2: Revert/Change Stage Flow */
                 <div className="space-y-4">
                   <div className="p-3 bg-rose-50 border border-rose-150 rounded-2xl text-xs text-rose-900 font-semibold space-y-1">
                     <p className="font-bold">⚠️ ข้อแนะนำการย้อนกลับขั้นตอน:</p>
@@ -2135,7 +2306,7 @@ ${logText}
                     <select
                       value={editLotCupColor}
                       onChange={(e) => setEditLotCupColor(e.target.value)}
-                      className="w-full rounded-xl border border-slate-300 p-3 bg-white font-bold text-slate-750"
+                      className="w-full rounded-xl border border-slate-300 p-3 bg-white font-bold text-slate-755"
                     >
                       <option value="สีขาว">สีขาว (White Cup)</option>
                       <option value="สีส้ม">สีส้ม (Orange Cup)</option>
@@ -2210,6 +2381,7 @@ ${logText}
                 />
               </div>
 
+              {/* SPECIFIC TO RAIL SELECTIONS FOR ACTIVE STAGES */}
               {(transitionStage === 'nursery' || transitionStage === 'nft') && (
                 <>
                   <div className="space-y-1.5">
@@ -2225,12 +2397,13 @@ ${logText}
                     </select>
                   </div>
 
+                  {/* CUP COLORS */}
                   <div className="space-y-1.5">
                     <label className="font-bold text-slate-700 block">🎨 เลือกสีถ้วยปลูกระบุแปลง</label>
                     <select
                       value={transitionForm.cupColor}
                       onChange={(e) => setTransitionForm({ ...transitionForm, cupColor: e.target.value })}
-                      className="w-full rounded-xl border border-slate-300 p-3 bg-white font-bold text-slate-705"
+                      className="w-full rounded-xl border border-slate-300 p-3 bg-white font-bold text-slate-700"
                     >
                       <option value="สีขาว">สีขาว (White Cup)</option>
                       <option value="สีส้ม">สีส้ม (Orange Cup)</option>
@@ -2287,7 +2460,70 @@ ${logText}
       )}
 
       {/* =======================================================
-          MODAL 4: PREMIUM CUSTOM CONFIRM DIALOG (SUPER SAFE & ELEGANT)
+          MODAL 4: CLOUD INTEGRATION SETTINGS PANEL (Google Apps Script URL setup)
+          ======================================================= */}
+      {showConfigModal && (
+        <div className="fixed inset-0 bg-slate-950/65 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-3xl p-6 max-w-md w-full shadow-2xl border border-slate-200 space-y-4 animate-in fade-in duration-150 text-sm">
+            
+            <div className="flex justify-between items-center border-b border-slate-100 pb-3">
+              <h3 className="text-base font-extrabold text-slate-900 flex items-center gap-1">
+                ⚙️ ตั้งค่าเชื่อมต่อ Google Apps Script
+              </h3>
+              <button onClick={() => setShowConfigModal(false)} className="text-slate-400 hover:text-slate-700 text-2xl font-bold px-1">×</button>
+            </div>
+
+            <p className="text-xs text-slate-500 leading-relaxed">
+              กรอก URL ลิงก์ Web App ที่ได้รับหลังจาก Deploy สคริปต์ Google Apps Script เพื่อประสานข้อมูลระหว่างชีตและเบราว์เซอร์ของคุณแบบเรียลไทม์
+            </p>
+
+            <form onSubmit={handleSaveConfig} className="space-y-4">
+              
+              <div className="space-y-1.5">
+                <label className="font-bold text-slate-700 block">Google Apps Script Web App URL</label>
+                <input
+                  type="url"
+                  placeholder="https://script.google.com/macros/s/.../exec"
+                  value={inputUrl}
+                  onChange={(e) => setInputUrl(e.target.value)}
+                  className="w-full rounded-xl border border-slate-300 p-3 font-mono font-medium text-xs text-slate-750 focus:outline-none focus:border-emerald-500"
+                />
+              </div>
+
+              <div className="bg-slate-50 p-3 rounded-xl border text-[11px] text-slate-500 leading-relaxed">
+                ℹ️ ข้อมูลนี้จะถูกเก็บไว้เป็นความลับภายในเบราว์เซอร์ของคุณ ผ่าน LocalStorage ไม่มีการนำส่งไปเผยแพร่ยังผู้รับอื่นๆ
+              </div>
+
+              <div className="flex gap-2.5 pt-2 justify-end font-bold">
+                <button
+                  type="button"
+                  onClick={handleClearConfig}
+                  className="px-3 py-2 bg-rose-50 text-rose-700 hover:bg-rose-100 rounded-lg text-xs"
+                >
+                  ล้างลิงก์เดิม
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowConfigModal(false)}
+                  className="px-4 py-2 bg-slate-100 hover:bg-slate-200 rounded-xl text-slate-650"
+                >
+                  ยกเลิก
+                </button>
+                <button
+                  type="submit"
+                  className="px-5 py-2 bg-emerald-700 hover:bg-emerald-800 text-white rounded-xl shadow-md"
+                >
+                  บันทึกใช้งาน 💾
+                </button>
+              </div>
+
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* =======================================================
+          MODAL 5: PREMIUM CUSTOM CONFIRM DIALOG
           ======================================================= */}
       {customConfirm.isOpen && (
         <div className="fixed inset-0 bg-slate-950/70 backdrop-blur-sm flex items-center justify-center p-4 z-50">
@@ -2318,7 +2554,7 @@ ${logText}
                 className={`px-5 py-2.5 text-white rounded-xl shadow-md ${
                   customConfirm.type === 'danger' ? 'bg-rose-600 hover:bg-rose-700' :
                   customConfirm.type === 'info' ? 'bg-sky-600 hover:bg-sky-700' :
-                  'bg-amber-600 hover:bg-amber-700'
+                  'bg-emerald-600 hover:bg-emerald-700'
                 }`}
               >
                 {customConfirm.confirmText}
