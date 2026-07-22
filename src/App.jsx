@@ -62,6 +62,50 @@ const formatThaiDateFolder = (date = new Date()) => {
   return `${date.getDate()}-${date.getMonth() + 1}-${String(buddhistYear).padStart(2, '0')}`;
 };
 
+
+const STAGE_RECOMMENDED_MAX_DAYS = {
+  tissue: 2,
+  sponge: 10,
+  nursery: 20,
+};
+
+const parseDateAtLocalMidnight = (dateString) => {
+  if (!dateString) return null;
+  const parts = String(dateString).split('-').map(Number);
+  if (parts.length !== 3 || parts.some(Number.isNaN)) return null;
+  const date = new Date(parts[0], parts[1] - 1, parts[2]);
+  return Number.isNaN(date.getTime()) ? null : date;
+};
+
+const getLotTimeline = (lot, now = new Date()) => {
+  const start = parseDateAtLocalMidnight(lot?.sowedDate);
+  if (!start) {
+    return { ageDays: 0, cycleDays: 0, deadlineDays: 0, overdueDays: 0, remainingDays: 0, progress: 0, level: 'unknown', label: 'ไม่พบวันที่เริ่มเพาะ' };
+  }
+
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const ageDays = Math.max(1, Math.floor((today - start) / 86400000) + 1);
+  const vegetableCycles = (lot.vegetables || [])
+    .map(item => VEGETABLE_TYPES.find(type => type.id === item.id)?.cycleDays)
+    .filter(Boolean);
+  const cycleDays = vegetableCycles.length ? Math.max(...vegetableCycles) : 45;
+  const deadlineDays = lot.stage === 'nft' ? cycleDays : (STAGE_RECOMMENDED_MAX_DAYS[lot.stage] || cycleDays);
+  const overdueDays = Math.max(0, ageDays - deadlineDays);
+  const remainingDays = Math.max(0, deadlineDays - ageDays);
+  const progress = Math.min(100, Math.round((ageDays / Math.max(deadlineDays, 1)) * 100));
+
+  if (lot.stage === 'harvested' || lot.stage === 'culled') {
+    return { ageDays, cycleDays, deadlineDays, overdueDays: 0, remainingDays: 0, progress: 100, level: 'closed', label: 'สิ้นสุดกระบวนการแล้ว' };
+  }
+  if (overdueDays > 0) {
+    return { ageDays, cycleDays, deadlineDays, overdueDays, remainingDays, progress, level: 'overdue', label: `เกินกำหนดขั้นตอน ${overdueDays} วัน` };
+  }
+  if (remainingDays <= 2) {
+    return { ageDays, cycleDays, deadlineDays, overdueDays, remainingDays, progress, level: 'warning', label: `เหลือ ${remainingDays} วันถึงกำหนดขั้นตอน` };
+  }
+  return { ageDays, cycleDays, deadlineDays, overdueDays, remainingDays, progress, level: 'normal', label: `เหลือ ${remainingDays} วันถึงกำหนดขั้นตอน` };
+};
+
 const VEGETABLE_TYPES = [
   { id: 'green-oak', name: 'กรีนโอ๊ค (Green Oak)', cycleDays: 45, ecRange: [1.2, 1.6], pHRange: [5.5, 6.5] },
   { id: 'red-oak', name: 'เรดโอ๊ค (Red Oak)', cycleDays: 45, ecRange: [1.2, 1.6], pHRange: [5.5, 6.5] },
@@ -488,24 +532,55 @@ export default function App() {
     );
   };
 
+  const callAppsScriptAction = async (payload) => {
+    if (!appsScriptUrl) throw new Error('ยังไม่ได้เชื่อมต่อ Google Apps Script');
+    const response = await fetch(appsScriptUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify(payload)
+    });
+    const text = await response.text();
+    let result;
+    try { result = JSON.parse(text); } catch (_) {
+      throw new Error(`Apps Script ตอบกลับไม่ใช่ JSON: ${text.slice(0, 250)}`);
+    }
+    if (!response.ok || result.status !== 'success') {
+      throw new Error(result.message || `HTTP status ${response.status}`);
+    }
+    return result;
+  };
+
   const handleDeleteLot = (lotId) => {
     const targetLot = lots.find(l => l.id === lotId);
     if (!targetLot) return;
 
-    const executeDelete = () => {
-      const updatedLots = lots.filter(l => l.id !== lotId);
-      setLots(updatedLots);
-      if (editingLot && editingLot.id === lotId) setEditingLot(null);
-      triggerAlert('warning', '🗑️ ได้ลบรายละเอียดล็อตพืชดังกล่าวออกจากคลังฐานข้อมูลแล้ว');
-      handlePushToCloud(updatedLots, dailyLogs);
+    const executeDelete = async () => {
+      setConnectionStatus('connecting');
+      try {
+        await callAppsScriptAction({
+          action: 'deleteLotAssets',
+          lotId: targetLot.id,
+          lotFolderName: `lot${targetLot.sequence || targetLot.id}`,
+          photoUrls: targetLot.locationPhotos || []
+        });
+        const updatedLots = lots.filter(l => l.id !== lotId);
+        setLots(updatedLots);
+        if (editingLot && editingLot.id === lotId) setEditingLot(null);
+        await handlePushToCloud(updatedLots, dailyLogs);
+        setConnectionStatus('connected');
+        triggerAlert('warning', '🗑️ ลบล็อต พร้อมไฟล์รูปและโฟลเดอร์ล็อตใน Google Drive แล้ว');
+      } catch (error) {
+        setConnectionStatus('error');
+        triggerAlert('danger', `❌ ลบล็อตไม่สำเร็จ: ${error.message || error}`);
+      }
     };
 
     requestConfirm(
-      '⚠️ ยืนยันการลบล็อตทิ้งถาวร',
-      `คุณกำลังจะลบล็อต "${targetLot.name}" ออกจากระบบ ประวัติและพารามิเตอร์ทั้งหมดจะสูญหายอย่างถาวร ต้องการทำรายการต่อใช่หรือไม่?`,
+      '⚠️ ยืนยันการลบล็อตและรูปถาวร',
+      `คุณกำลังจะลบล็อต "${targetLot.name}" รวมถึงรูปทั้งหมดและโฟลเดอร์ lot${targetLot.sequence || targetLot.id} ใน Google Drive การกระทำนี้ไม่สามารถย้อนกลับได้`,
       executeDelete,
       'danger',
-      'ลบถาวรทันที'
+      'ลบล็อตและรูปทั้งหมด'
     );
   };
 
@@ -597,19 +672,36 @@ export default function App() {
   };
 
   const handleDeleteDailyLog = (logId) => {
-    const executeDeleteLog = () => {
-      const updatedLogs = dailyLogs.filter(item => item.id !== logId);
-      setDailyLogs(updatedLogs);
-      triggerAlert('warning', '🗑️ ลบประวัติค่าน้ำที่ระบุเรียบร้อย');
-      handlePushToCloud(lots, updatedLogs);
+    const targetLog = dailyLogs.find(item => item.id === logId);
+    if (!targetLog) return;
+
+    const executeDeleteLog = async () => {
+      setConnectionStatus('connecting');
+      try {
+        const date = targetLog.date ? parseDateAtLocalMidnight(targetLog.date) : new Date();
+        await callAppsScriptAction({
+          action: 'deleteDailyLogAssets',
+          logId: targetLog.id,
+          dateFolderName: formatThaiDateFolder(date || new Date()),
+          photoUrls: targetLog.dailyPhotos || []
+        });
+        const updatedLogs = dailyLogs.filter(item => item.id !== logId);
+        setDailyLogs(updatedLogs);
+        await handlePushToCloud(lots, updatedLogs);
+        setConnectionStatus('connected');
+        triggerAlert('warning', '🗑️ ลบประวัติค่าน้ำและไฟล์รูปของรายการนี้จาก Google Drive แล้ว');
+      } catch (error) {
+        setConnectionStatus('error');
+        triggerAlert('danger', `❌ ลบประวัติไม่สำเร็จ: ${error.message || error}`);
+      }
     };
 
     requestConfirm(
-      'ยืนยันการลบประวัติย้อนหลัง',
-      'คุณต้องการลบรายงานบันทึกคุณภาพน้ำรายการนี้ออกจากประวัติย้อนหลังของฟาร์มใช่หรือไม่? (การกระทำนี้ไม่สามารถย้อนกลับได้)',
+      'ยืนยันการลบประวัติและรูปถาวร',
+      'ระบบจะลบบันทึกนี้พร้อมไฟล์รูปที่แนบไว้ใน Google Drive แต่จะไม่ลบรูปของบันทึกรายการอื่นในวันเดียวกัน',
       executeDeleteLog,
       'danger',
-      'ลบประวัติ'
+      'ลบประวัติและรูป'
     );
   };
 
@@ -856,6 +948,12 @@ ${logText}
 
   const activeLots = lots.filter(l => l.stage !== 'harvested' && l.stage !== 'culled');
   const totalActivePlants = activeLots.reduce((sum, l) => sum + l.currentQty, 0);
+
+  const activeLotTimelines = activeLots.map(lot => ({ lot, timeline: getLotTimeline(lot, currentTime) }));
+  const overdueLots = activeLotTimelines
+    .filter(item => item.timeline.level === 'overdue')
+    .sort((a, b) => b.timeline.overdueDays - a.timeline.overdueDays);
+  const nearDueLots = activeLotTimelines.filter(item => item.timeline.level === 'warning');
 
   const getStageCountAndPercent = (stageKey) => {
     if (totalActivePlants === 0) return { count: 0, percent: 0 };
@@ -1398,6 +1496,7 @@ ${logText}
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
               {activeLots.map(lot => {
                 const currentRailObj = RAILS.find(r => r.id === lot.railId);
+                const timeline = getLotTimeline(lot, currentTime);
                 
                 return (
                   <div key={lot.id} className="bg-white rounded-3xl border border-slate-200 shadow-sm overflow-hidden flex flex-col justify-between hover:shadow-md transition-all">
@@ -1436,6 +1535,32 @@ ${logText}
                     {/* Lot Content */}
                     <div className="p-5 space-y-4 flex-grow text-xs sm:text-sm text-slate-700">
                       
+                      <div className={`p-3 rounded-2xl border-2 ${
+                        timeline.level === 'overdue' ? 'bg-rose-50 border-rose-300' :
+                        timeline.level === 'warning' ? 'bg-amber-50 border-amber-300' :
+                        'bg-emerald-50 border-emerald-200'
+                      }`}>
+                        <div className="flex items-center justify-between gap-2">
+                          <div>
+                            <p className="text-[10px] font-extrabold uppercase text-slate-500">อายุล็อตตั้งแต่เริ่มเพาะ</p>
+                            <p className={`text-lg font-extrabold ${timeline.level === 'overdue' ? 'text-rose-700' : timeline.level === 'warning' ? 'text-amber-700' : 'text-emerald-700'}`}>
+                              🌱 {timeline.ageDays} วัน
+                            </p>
+                          </div>
+                          <span className={`text-[11px] font-extrabold px-2.5 py-1 rounded-xl text-right ${
+                            timeline.level === 'overdue' ? 'bg-rose-600 text-white' :
+                            timeline.level === 'warning' ? 'bg-amber-500 text-white' :
+                            'bg-white text-emerald-700 border border-emerald-200'
+                          }`}>
+                            {timeline.label}
+                          </span>
+                        </div>
+                        <div className="mt-2 h-2 bg-white rounded-full overflow-hidden border">
+                          <div className={`${timeline.level === 'overdue' ? 'bg-rose-500' : timeline.level === 'warning' ? 'bg-amber-500' : 'bg-emerald-500'} h-full rounded-full`} style={{ width: `${timeline.progress}%` }}></div>
+                        </div>
+                        <p className="mt-1 text-[10px] text-slate-500">กำหนดแนะนำของขั้นตอนปัจจุบัน: ภายในวันที่ {timeline.deadlineDays} ของรอบปลูก · รอบเก็บเกี่ยวประมาณ {timeline.cycleDays} วัน</p>
+                      </div>
+
                       {/* Yield Numbers */}
                       <div className="bg-slate-50 p-3 rounded-2xl border border-slate-155 grid grid-cols-2 gap-2 text-center">
                         <div>
@@ -1714,9 +1839,34 @@ ${logText}
             ======================================================= */}
         {activeTab === 'dashboard' && (
           <div className="space-y-6 animate-in fade-in duration-200">
+
+            <div className={`rounded-3xl border-2 p-5 sm:p-6 shadow-sm ${overdueLots.length ? 'bg-rose-50 border-rose-300' : nearDueLots.length ? 'bg-amber-50 border-amber-300' : 'bg-emerald-50 border-emerald-200'}`}>
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                <div>
+                  <h2 className={`text-lg sm:text-xl font-extrabold ${overdueLots.length ? 'text-rose-800' : nearDueLots.length ? 'text-amber-800' : 'text-emerald-800'}`}>
+                    {overdueLots.length ? `🚨 พบ ${overdueLots.length} ล็อตเกินกำหนดขั้นตอน` : nearDueLots.length ? `⏰ มี ${nearDueLots.length} ล็อตใกล้ถึงกำหนด` : '✅ ทุกล็อตอยู่ในช่วงเวลาที่แนะนำ'}
+                  </h2>
+                  <p className="text-xs sm:text-sm text-slate-600 mt-1">คำนวณอัตโนมัติจากวันที่เริ่มเพาะ ชนิดผัก และขั้นตอนปัจจุบัน โดยไม่แก้ไขข้อมูลเดิม</p>
+                </div>
+                <button onClick={() => setActiveTab('lots')} className="bg-white border-2 border-current px-4 py-2 rounded-xl font-extrabold text-sm text-slate-700 hover:bg-slate-50">เปิดหน้าจัดการล็อต →</button>
+              </div>
+              {(overdueLots.length > 0 || nearDueLots.length > 0) && (
+                <div className="mt-4 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+                  {[...overdueLots, ...nearDueLots].slice(0, 6).map(({ lot, timeline }) => (
+                    <div key={lot.id} className="bg-white rounded-2xl border p-3 flex items-center justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="font-extrabold text-sm text-slate-800 truncate">{lot.name}</p>
+                        <p className="text-xs text-slate-500">อายุ {timeline.ageDays} วัน · ขั้นตอน {lot.stage}</p>
+                      </div>
+                      <span className={`shrink-0 px-2.5 py-1 rounded-xl text-xs font-extrabold ${timeline.level === 'overdue' ? 'bg-rose-600 text-white' : 'bg-amber-500 text-white'}`}>{timeline.label}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
             
             {/* Top Stats Cards */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
               
               <div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-sm flex items-center justify-between">
                 <div>
@@ -1734,6 +1884,15 @@ ${logText}
                   <p className="text-xs text-slate-500 mt-1 font-semibold">ปลูกและเพาะเลี้ยงตามสัดส่วนราง</p>
                 </div>
                 <div className="bg-sky-50 text-sky-700 p-4 rounded-2xl text-2xl font-bold">💧</div>
+              </div>
+
+              <div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-sm flex items-center justify-between">
+                <div>
+                  <p className="text-xs font-extrabold text-slate-400 uppercase tracking-wider">ล็อตที่ต้องติดตามเวลา</p>
+                  <p className={`text-2xl sm:text-3xl font-extrabold mt-1 ${overdueLots.length ? 'text-rose-700' : 'text-emerald-700'}`}>{overdueLots.length} ล็อต</p>
+                  <p className="text-xs text-slate-500 mt-1 font-semibold">ใกล้ครบกำหนดอีก {nearDueLots.length} ล็อต</p>
+                </div>
+                <div className={`${overdueLots.length ? 'bg-rose-50 text-rose-700' : 'bg-emerald-50 text-emerald-700'} p-4 rounded-2xl text-2xl font-bold`}>{overdueLots.length ? '🚨' : '✅'}</div>
               </div>
 
               {/* Doughnut Pie Chart Card for stage distribution */}
@@ -1809,6 +1968,7 @@ ${logText}
                     <tr className="bg-slate-50 border-b border-slate-200 text-xs font-bold text-slate-500 uppercase tracking-wider">
                       <th className="py-3 px-5">ชื่อล็อต / ชนิดผัก</th>
                       <th className="py-3 px-5">วันที่เริ่มหยอดเพาะ</th>
+                      <th className="py-3 px-5">อายุล็อต / กำหนด</th>
                       <th className="py-3 px-5">สถานะ</th>
                       <th className="py-3 px-5">รางปลูก</th>
                       <th className="py-3 px-5">ยอดที่มีชีวิต</th>
@@ -1817,6 +1977,7 @@ ${logText}
                   <tbody className="divide-y divide-slate-150 text-slate-700">
                     {lots.map(lot => {
                       const rObj = RAILS.find(r => r.id === lot.railId);
+                      const timeline = getLotTimeline(lot, currentTime);
                       return (
                         <tr key={lot.id} className="hover:bg-slate-50/50 transition-all">
                           <td className="py-4 px-5">
@@ -1833,6 +1994,10 @@ ${logText}
                             </div>
                           </td>
                           <td className="py-4 px-5 font-mono">{lot.sowedDate}</td>
+                          <td className="py-4 px-5">
+                            <p className="font-extrabold text-slate-800">{timeline.ageDays} วัน</p>
+                            <span className={`inline-flex mt-1 px-2 py-0.5 rounded-lg text-[11px] font-extrabold ${timeline.level === 'overdue' ? 'bg-rose-100 text-rose-800' : timeline.level === 'warning' ? 'bg-amber-100 text-amber-800' : timeline.level === 'closed' ? 'bg-slate-100 text-slate-600' : 'bg-emerald-100 text-emerald-800'}`}>{timeline.label}</span>
+                          </td>
                           <td className="py-4 px-5">
                             <span className={`px-2.5 py-1 rounded-xl text-xs font-bold ${
                               lot.stage === 'tissue' ? 'bg-amber-50 text-amber-800' :
@@ -1856,7 +2021,7 @@ ${logText}
                     })}
                     {lots.length === 0 && (
                       <tr>
-                        <td colSpan="5" className="py-8 text-center text-slate-400 italic">
+                        <td colSpan="6" className="py-8 text-center text-slate-400 italic">
                           📭 ไม่มีข้อมูลประวัติล็อตปลูกในขณะนี้ (สเปรดชีตเปล่า)
                         </td>
                       </tr>
